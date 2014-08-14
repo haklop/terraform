@@ -95,7 +95,17 @@ func resource_openstack_lbaas_destroy(
 		return err
 	}
 
-	// TODO destroy member
+	pool, err := networksApi.GetPool(s.ID)
+	if err != nil {
+		return err
+	}
+
+	for _, member := range pool.Members {
+		err = networksApi.DeleteMember(member)
+		if err != nil {
+			return err
+		}
+	}
 
 	err = networksApi.DeletePool(s.ID)
 
