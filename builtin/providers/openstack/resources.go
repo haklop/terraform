@@ -110,6 +110,8 @@ func init() {
 						"subnet_id",
 						"protocol",
 						"lb_method",
+						"member.*.port",
+						"member.*.instance_id",
 					},
 					Optional: []string{
 						"description",
