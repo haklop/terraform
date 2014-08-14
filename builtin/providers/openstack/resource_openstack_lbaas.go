@@ -2,10 +2,12 @@ package openstack
 
 import (
 	"github.com/haklop/gophercloud-extensions/network"
+	"github.com/hashicorp/terraform/flatmap"
 	"github.com/hashicorp/terraform/helper/diff"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/racker/perigee"
 	"log"
+	"strconv"
 )
 
 func resource_openstack_lbaas_create(
@@ -36,6 +38,50 @@ func resource_openstack_lbaas_create(
 
 	rs.ID = pool.Id
 
+	v, ok := flatmap.Expand(rs.Attributes, "member").([]interface{})
+	if ok {
+		members, err := expandMembers(v)
+		if err != nil {
+			return rs, err
+		}
+
+		for _, member := range members {
+
+			// TODO order ports
+			ports, err := networksApi.GetPorts()
+			if err != nil {
+				return nil, err
+			}
+
+			var address string
+			for _, port := range ports {
+				if port.DeviceId == member.InstanceId {
+					for _, ips := range port.FixedIps {
+						// ff possible, select a port on pool subnet
+						if ips.SubnetId == rs.Attributes["subnet_id"] || address == "" {
+							address = ips.IpAddress
+						}
+					}
+				}
+			}
+
+			newMember := network.NewMember{
+				ProtocolPort: member.ProtocolPort,
+				PoolId:       rs.ID,
+				AdminStateUp: true,
+				Address:      address,
+			}
+
+			result, err := networksApi.CreateMember(newMember)
+			if err != nil {
+				return nil, err
+			}
+			member.MemberId = result.Id
+
+		}
+
+	}
+
 	return rs, err
 }
 
@@ -48,6 +94,8 @@ func resource_openstack_lbaas_destroy(
 	if err != nil {
 		return err
 	}
+
+	// TODO destroy member
 
 	err = networksApi.DeletePool(s.ID)
 
@@ -84,6 +132,8 @@ func resource_openstack_lbaas_refresh(
 	s.Attributes["description"] = pool.Description
 	s.Attributes["lb_method"] = pool.LoadMethod
 
+	// TODO compare pool.Members with Id on s.Extra['members'] ?
+
 	return s, nil
 }
 
@@ -99,6 +149,7 @@ func resource_openstack_lbaas_diff(
 			"protocol":    diff.AttrTypeCreate,
 			"lb_method":   diff.AttrTypeUpdate,
 			"description": diff.AttrTypeUpdate,
+			"member":      diff.AttrTypeUpdate,
 		},
 
 		ComputedAttrs: []string{
@@ -145,5 +196,39 @@ func resource_openstack_lbaas_update(
 
 	_, err = networksApi.UpdatePool(updatedPool)
 
+	// TODO update members
+
 	return rs, err
+}
+
+func expandMembers(configured []interface{}) ([]poolMember, error) {
+	members := make([]poolMember, 0, len(configured))
+
+	for _, member := range configured {
+		raw := member.(map[string]interface{})
+
+		newMember := poolMember{}
+
+		if attr, ok := raw["port"].(string); ok {
+			port, err := strconv.Atoi(attr)
+			if err != nil {
+				return nil, err
+			}
+			newMember.ProtocolPort = port
+		}
+
+		if attr, ok := raw["instance_id"].(string); ok {
+			newMember.InstanceId = attr
+		}
+
+		members = append(members, newMember)
+	}
+
+	return members, nil
+}
+
+type poolMember struct {
+	ProtocolPort int
+	InstanceId   string
+	MemberId     string
 }
