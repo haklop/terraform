@@ -35,6 +35,18 @@ func TestExprParse(t *testing.T) {
 		},
 
 		{
+			"module.foo.bar",
+			&VariableInterpolation{
+				Variable: &ModuleVariable{
+					Name:  "foo",
+					Field: "bar",
+					key:   "module.foo.bar",
+				},
+			},
+			false,
+		},
+
+		{
 			"lookup(var.foo, var.bar)",
 			&FunctionInterpolation{
 				Func: nil, // Funcs["lookup"]
@@ -84,6 +96,19 @@ func TestExprParse(t *testing.T) {
 							},
 						},
 					},
+				},
+			},
+			false,
+		},
+
+		{
+			`concat("foo","-","0.0/16")`,
+			&FunctionInterpolation{
+				Func: nil, // Funcs["lookup"]
+				Args: []Interpolation{
+					&LiteralInterpolation{Literal: "foo"},
+					&LiteralInterpolation{Literal: "-"},
+					&LiteralInterpolation{Literal: "0.0/16"},
 				},
 			},
 			false,

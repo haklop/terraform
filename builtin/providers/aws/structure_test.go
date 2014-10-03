@@ -26,76 +26,62 @@ func testConf() map[string]string {
 		"ingress.0.to_port":            "-1",
 		"ingress.0.cidr_blocks.#":      "1",
 		"ingress.0.cidr_blocks.0":      "0.0.0.0/0",
-		"ingress.0.security_groups.#":  "1",
+		"ingress.0.security_groups.#":  "2",
 		"ingress.0.security_groups.0":  "sg-11111",
+		"ingress.0.security_groups.1":  "foo/sg-22222",
 	}
 }
 
 func Test_expandIPPerms(t *testing.T) {
-	expanded := flatmap.Expand(testConf(), "ingress").([]interface{})
-	perms, err := expandIPPerms(expanded)
-
-	if err != nil {
-		t.Fatalf("bad: %#v", err)
+	expanded := []interface{}{
+		map[string]interface{}{
+			"protocol":    "icmp",
+			"from_port":   1,
+			"to_port":     -1,
+			"cidr_blocks": []interface{}{"0.0.0.0/0"},
+			"security_groups": []interface{}{
+				"sg-11111",
+				"foo/sg-22222",
+			},
+		},
+		map[string]interface{}{
+			"protocol":  "icmp",
+			"from_port": 1,
+			"to_port":   -1,
+			"self":      true,
+		},
 	}
-	expected := ec2.IPPerm{
-		Protocol:  "icmp",
-		FromPort:  1,
-		ToPort:    -1,
-		SourceIPs: []string{"0.0.0.0/0"},
-		SourceGroups: []ec2.UserSecurityGroup{
-			ec2.UserSecurityGroup{
-				Id: "sg-11111",
+	perms := expandIPPerms("foo", expanded)
+
+	expected := []ec2.IPPerm{
+		ec2.IPPerm{
+			Protocol:  "icmp",
+			FromPort:  1,
+			ToPort:    -1,
+			SourceIPs: []string{"0.0.0.0/0"},
+			SourceGroups: []ec2.UserSecurityGroup{
+				ec2.UserSecurityGroup{
+					Id: "sg-11111",
+				},
+				ec2.UserSecurityGroup{
+					OwnerId: "foo",
+					Id:      "sg-22222",
+				},
+			},
+		},
+		ec2.IPPerm{
+			Protocol: "icmp",
+			FromPort: 1,
+			ToPort:   -1,
+			SourceGroups: []ec2.UserSecurityGroup{
+				ec2.UserSecurityGroup{
+					Id: "foo",
+				},
 			},
 		},
 	}
 
-	if !reflect.DeepEqual(perms[0], expected) {
-		t.Fatalf(
-			"Got:\n\n%#v\n\nExpected:\n\n%#v\n",
-			perms[0],
-			expected)
-	}
-
-}
-
-func Test_expandIPPerms_bad(t *testing.T) {
-	badConf := map[string]string{
-		"ingress.#":           "1",
-		"ingress.0.from_port": "not number",
-	}
-
-	expanded := flatmap.Expand(badConf, "ingress").([]interface{})
-	perms, err := expandIPPerms(expanded)
-
-	if err == nil {
-		t.Fatalf("should have err: %#v", perms)
-	}
-}
-
-func Test_expandIPPerms_NoCidr(t *testing.T) {
-	conf := testConf()
-	delete(conf, "ingress.0.cidr_blocks.#")
-	delete(conf, "ingress.0.cidr_blocks.0")
-
-	expanded := flatmap.Expand(conf, "ingress").([]interface{})
-	perms, err := expandIPPerms(expanded)
-
-	if err != nil {
-		t.Fatalf("bad: %#v", err)
-	}
-	expected := ec2.IPPerm{
-		Protocol: "icmp",
-		FromPort: 1,
-		ToPort:   -1,
-		SourceGroups: []ec2.UserSecurityGroup{
-			ec2.UserSecurityGroup{
-				Id: "sg-11111",
-			},
-		},
-	}
-
-	if !reflect.DeepEqual(perms[0], expected) {
+	if !reflect.DeepEqual(perms, expected) {
 		t.Fatalf(
 			"Got:\n\n%#v\n\nExpected:\n\n%#v\n",
 			perms[0],

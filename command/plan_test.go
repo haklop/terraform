@@ -4,7 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform/terraform"
@@ -38,10 +38,17 @@ func TestPlan(t *testing.T) {
 
 func TestPlan_destroy(t *testing.T) {
 	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -73,9 +80,11 @@ func TestPlan_destroy(t *testing.T) {
 	}
 
 	plan := testReadPlan(t, outPath)
-	for _, r := range plan.Diff.Resources {
-		if !r.Destroy {
-			t.Fatalf("bad: %#v", r)
+	for _, m := range plan.Diff.Modules {
+		for _, r := range m.Resources {
+			if !r.Destroy {
+				t.Fatalf("bad: %#v", r)
+			}
 		}
 	}
 
@@ -90,10 +99,13 @@ func TestPlan_destroy(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 
-	if !reflect.DeepEqual(backupState, originalState) {
-		t.Fatalf("bad: %#v", backupState)
+	actualStr := strings.TrimSpace(backupState.String())
+	expectedStr := strings.TrimSpace(originalState.String())
+	if actualStr != expectedStr {
+		t.Fatalf("bad:\n\n%s\n\n%s", actualStr, expectedStr)
 	}
 }
+
 func TestPlan_noState(t *testing.T) {
 	p := testProvider()
 	ui := new(cli.MockUi)
@@ -117,11 +129,10 @@ func TestPlan_noState(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := &terraform.ResourceState{
-		Type: "test_instance",
-	}
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testPlanNoStateStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 }
 
@@ -142,7 +153,7 @@ func TestPlan_outPath(t *testing.T) {
 		},
 	}
 
-	p.DiffReturn = &terraform.ResourceDiff{
+	p.DiffReturn = &terraform.InstanceDiff{
 		Destroy: true,
 	}
 
@@ -197,15 +208,7 @@ func TestPlan_state(t *testing.T) {
 	statePath := tf.Name()
 	defer os.Remove(tf.Name())
 
-	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
-			},
-		},
-	}
-
+	originalState := testState()
 	err = terraform.WriteState(originalState, tf)
 	tf.Close()
 	if err != nil {
@@ -230,21 +233,15 @@ func TestPlan_state(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := originalState.Resources["test_instance.foo"]
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testPlanStateStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 }
 
 func TestPlan_stateDefault(t *testing.T) {
-	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
-			},
-		},
-	}
+	originalState := testState()
 
 	// Write the state file in a temporary directory with the
 	// default filename.
@@ -291,9 +288,10 @@ func TestPlan_stateDefault(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := originalState.Resources["test_instance.foo"]
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testPlanStateDefaultStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 }
 
@@ -309,8 +307,9 @@ func TestPlan_vars(t *testing.T) {
 
 	actual := ""
 	p.DiffFn = func(
-		s *terraform.ResourceState,
-		c *terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		c *terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
 		if v, ok := c.Config["value"]; ok {
 			actual = v.(string)
 		}
@@ -348,8 +347,9 @@ func TestPlan_varFile(t *testing.T) {
 
 	actual := ""
 	p.DiffFn = func(
-		s *terraform.ResourceState,
-		c *terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		c *terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
 		if v, ok := c.Config["value"]; ok {
 			actual = v.(string)
 		}
@@ -397,8 +397,9 @@ func TestPlan_varFileDefault(t *testing.T) {
 
 	actual := ""
 	p.DiffFn = func(
-		s *terraform.ResourceState,
-		c *terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		c *terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
 		if v, ok := c.Config["value"]; ok {
 			actual = v.(string)
 		}
@@ -438,10 +439,17 @@ func TestPlan_backup(t *testing.T) {
 	defer os.Remove(backupPath)
 
 	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -471,9 +479,10 @@ func TestPlan_backup(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := originalState.Resources["test_instance.foo"]
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testPlanBackupStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 
 	// Verify the backup exist
@@ -488,8 +497,10 @@ func TestPlan_backup(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 
-	if !reflect.DeepEqual(backupState, originalState) {
-		t.Fatalf("bad: %#v", backupState)
+	actualStr := strings.TrimSpace(backupState.String())
+	expectedStr := strings.TrimSpace(originalState.String())
+	if actualStr != expectedStr {
+		t.Fatalf("bad:\n\n%s\n\n%s", actualStr, expectedStr)
 	}
 }
 
@@ -503,10 +514,17 @@ func TestPlan_disableBackup(t *testing.T) {
 	defer os.Remove(tf.Name())
 
 	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -536,9 +554,10 @@ func TestPlan_disableBackup(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := originalState.Resources["test_instance.foo"]
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testPlanDisableBackupStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 
 	// Ensure there is no backup
@@ -550,4 +569,24 @@ func TestPlan_disableBackup(t *testing.T) {
 
 const planVarFile = `
 foo = "bar"
+`
+
+const testPlanBackupStr = `
+ID = bar
+`
+
+const testPlanDisableBackupStr = `
+ID = bar
+`
+
+const testPlanNoStateStr = `
+<not created>
+`
+
+const testPlanStateStr = `
+ID = bar
+`
+
+const testPlanStateDefaultStr = `
+ID = bar
 `

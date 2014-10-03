@@ -3,7 +3,7 @@ package command
 import (
 	"testing"
 
-	"github.com/hashicorp/terraform/config"
+	"github.com/hashicorp/terraform/config/module"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/mitchellh/cli"
 )
@@ -43,7 +43,7 @@ func TestShow_noArgs(t *testing.T) {
 
 func TestShow_plan(t *testing.T) {
 	planPath := testPlanFile(t, &terraform.Plan{
-		Config: new(config.Config),
+		Module: new(module.Tree),
 	})
 
 	ui := new(cli.MockUi)
@@ -63,15 +63,7 @@ func TestShow_plan(t *testing.T) {
 }
 
 func TestShow_state(t *testing.T) {
-	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
-			},
-		},
-	}
-
+	originalState := testState()
 	statePath := testStateFile(t, originalState)
 
 	ui := new(cli.MockUi)

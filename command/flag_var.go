@@ -2,9 +2,11 @@ package command
 
 import (
 	"fmt"
+	"io/ioutil"
 	"strings"
 
-	"github.com/mitchellh/go-libucl"
+	"github.com/hashicorp/hcl"
+	"github.com/mitchellh/go-homedir"
 )
 
 // FlagVar is a flag.Value implementation for parsing user variables
@@ -55,25 +57,29 @@ func (v *FlagVarFile) Set(raw string) error {
 	return nil
 }
 
-const libuclParseFlags = libucl.ParserNoTime
-
-func loadVarFile(path string) (map[string]string, error) {
-	var obj *libucl.Object
-
-	parser := libucl.NewParser(libuclParseFlags)
-	err := parser.AddFile(path)
-	if err == nil {
-		obj = parser.Object()
-		defer obj.Close()
-	}
-	defer parser.Close()
-
+func loadVarFile(rawPath string) (map[string]string, error) {
+	path, err := homedir.Expand(rawPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(
+			"Error expanding path: %s", err)
+	}
+
+	// Read the HCL file and prepare for parsing
+	d, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"Error reading %s: %s", path, err)
+	}
+
+	// Parse it
+	obj, err := hcl.Parse(string(d))
+	if err != nil {
+		return nil, fmt.Errorf(
+			"Error parsing %s: %s", path, err)
 	}
 
 	var result map[string]string
-	if err := obj.Decode(&result); err != nil {
+	if err := hcl.DecodeObject(&result, obj); err != nil {
 		return nil, err
 	}
 

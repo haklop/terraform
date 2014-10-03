@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/bgentry/heroku-go"
+	"github.com/cyberdelia/heroku-go/v3"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 )
@@ -35,14 +35,14 @@ func TestAccHerokuDomain_Basic(t *testing.T) {
 }
 
 func testAccCheckHerokuDomainDestroy(s *terraform.State) error {
-	client := testAccProvider.client
+	client := testAccProvider.Meta().(*heroku.Service)
 
-	for _, rs := range s.Resources {
+	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "heroku_domain" {
 			continue
 		}
 
-		_, err := client.DomainInfo(rs.Attributes["app"], rs.ID)
+		_, err := client.DomainInfo(rs.Primary.Attributes["app"], rs.Primary.ID)
 
 		if err == nil {
 			return fmt.Errorf("Domain still exists")
@@ -65,25 +65,25 @@ func testAccCheckHerokuDomainAttributes(Domain *heroku.Domain) resource.TestChec
 
 func testAccCheckHerokuDomainExists(n string, Domain *heroku.Domain) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.Resources[n]
+		rs, ok := s.RootModule().Resources[n]
 
 		if !ok {
 			return fmt.Errorf("Not found: %s", n)
 		}
 
-		if rs.ID == "" {
+		if rs.Primary.ID == "" {
 			return fmt.Errorf("No Domain ID is set")
 		}
 
-		client := testAccProvider.client
+		client := testAccProvider.Meta().(*heroku.Service)
 
-		foundDomain, err := client.DomainInfo(rs.Attributes["app"], rs.ID)
+		foundDomain, err := client.DomainInfo(rs.Primary.Attributes["app"], rs.Primary.ID)
 
 		if err != nil {
 			return err
 		}
 
-		if foundDomain.Id != rs.ID {
+		if foundDomain.ID != rs.Primary.ID {
 			return fmt.Errorf("Domain not found")
 		}
 
@@ -96,6 +96,7 @@ func testAccCheckHerokuDomainExists(n string, Domain *heroku.Domain) resource.Te
 const testAccCheckHerokuDomainConfig_basic = `
 resource "heroku_app" "foobar" {
     name = "terraform-test-app"
+    region = "us"
 }
 
 resource "heroku_domain" "foobar" {

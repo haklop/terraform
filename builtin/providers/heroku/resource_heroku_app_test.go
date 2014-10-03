@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/bgentry/heroku-go"
+	"github.com/cyberdelia/heroku-go/v3"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 )
@@ -103,14 +103,14 @@ func TestAccHerokuApp_NukeVars(t *testing.T) {
 }
 
 func testAccCheckHerokuAppDestroy(s *terraform.State) error {
-	client := testAccProvider.client
+	client := testAccProvider.Meta().(*heroku.Service)
 
-	for _, rs := range s.Resources {
+	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "heroku_app" {
 			continue
 		}
 
-		_, err := client.AppInfo(rs.ID)
+		_, err := client.AppInfo(rs.Primary.ID)
 
 		if err == nil {
 			return fmt.Errorf("App still exists")
@@ -122,7 +122,7 @@ func testAccCheckHerokuAppDestroy(s *terraform.State) error {
 
 func testAccCheckHerokuAppAttributes(app *heroku.App) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.client
+		client := testAccProvider.Meta().(*heroku.Service)
 
 		if app.Region.Name != "us" {
 			return fmt.Errorf("Bad region: %s", app.Region.Name)
@@ -151,7 +151,7 @@ func testAccCheckHerokuAppAttributes(app *heroku.App) resource.TestCheckFunc {
 
 func testAccCheckHerokuAppAttributesUpdated(app *heroku.App) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.client
+		client := testAccProvider.Meta().(*heroku.Service)
 
 		if app.Name != "terraform-test-renamed" {
 			return fmt.Errorf("Bad name: %s", app.Name)
@@ -178,7 +178,7 @@ func testAccCheckHerokuAppAttributesUpdated(app *heroku.App) resource.TestCheckF
 
 func testAccCheckHerokuAppAttributesNoVars(app *heroku.App) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		client := testAccProvider.client
+		client := testAccProvider.Meta().(*heroku.Service)
 
 		if app.Name != "terraform-test-app" {
 			return fmt.Errorf("Bad name: %s", app.Name)
@@ -199,25 +199,25 @@ func testAccCheckHerokuAppAttributesNoVars(app *heroku.App) resource.TestCheckFu
 
 func testAccCheckHerokuAppExists(n string, app *heroku.App) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.Resources[n]
+		rs, ok := s.RootModule().Resources[n]
 
 		if !ok {
 			return fmt.Errorf("Not found: %s", n)
 		}
 
-		if rs.ID == "" {
+		if rs.Primary.ID == "" {
 			return fmt.Errorf("No App Name is set")
 		}
 
-		client := testAccProvider.client
+		client := testAccProvider.Meta().(*heroku.Service)
 
-		foundApp, err := client.AppInfo(rs.ID)
+		foundApp, err := client.AppInfo(rs.Primary.ID)
 
 		if err != nil {
 			return err
 		}
 
-		if foundApp.Name != rs.ID {
+		if foundApp.Name != rs.Primary.ID {
 			return fmt.Errorf("App not found")
 		}
 
@@ -230,6 +230,7 @@ func testAccCheckHerokuAppExists(n string, app *heroku.App) resource.TestCheckFu
 const testAccCheckHerokuAppConfig_basic = `
 resource "heroku_app" "foobar" {
 	name = "terraform-test-app"
+	region = "us"
 
 	config_vars {
 		FOO = "bar"
@@ -239,6 +240,7 @@ resource "heroku_app" "foobar" {
 const testAccCheckHerokuAppConfig_updated = `
 resource "heroku_app" "foobar" {
 	name = "terraform-test-renamed"
+	region = "us"
 
 	config_vars {
 		FOO = "bing"
@@ -249,4 +251,5 @@ resource "heroku_app" "foobar" {
 const testAccCheckHerokuAppConfig_no_vars = `
 resource "heroku_app" "foobar" {
 	name = "terraform-test-app"
+	region = "us"
 }`

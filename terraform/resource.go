@@ -27,27 +27,56 @@ type ResourceProvisionerConfig struct {
 // wants to reach.
 type Resource struct {
 	Id           string
+	Info         *InstanceInfo
 	Config       *ResourceConfig
-	Diff         *ResourceDiff
+	Dependencies []string
+	Diff         *InstanceDiff
 	Provider     ResourceProvider
-	State        *ResourceState
+	State        *InstanceState
 	Provisioners []*ResourceProvisionerConfig
-	Tainted      bool
+	CountIndex   int
+	Flags        ResourceFlag
+	TaintedIndex int
 }
 
-// Vars returns the mapping of variables that should be replaced in
-// configuration based on the attributes of this resource.
-func (r *Resource) Vars() map[string]string {
-	if r.State == nil {
-		return nil
+// ResourceKind specifies what kind of instance we're working with, whether
+// its a primary instance, a tainted instance, or an orphan.
+type ResourceFlag byte
+
+const (
+	FlagPrimary ResourceFlag = 1 << iota
+	FlagTainted
+	FlagOrphan
+	FlagHasTainted
+	FlagReplacePrimary
+	FlagDeposed
+)
+
+// InstanceInfo is used to hold information about the instance and/or
+// resource being modified.
+type InstanceInfo struct {
+	// Id is a unique name to represent this instance. This is not related
+	// to InstanceState.ID in any way.
+	Id string
+
+	// ModulePath is the complete path of the module containing this
+	// instance.
+	ModulePath []string
+
+	// Type is the resource type of this instance
+	Type string
+}
+
+// HumanId is a unique Id that is human-friendly and useful for UI elements.
+func (i *InstanceInfo) HumanId() string {
+	if len(i.ModulePath) <= 1 {
+		return i.Id
 	}
 
-	vars := make(map[string]string)
-	for ak, av := range r.State.Attributes {
-		vars[fmt.Sprintf("%s.%s", r.Id, ak)] = av
-	}
-
-	return vars
+	return fmt.Sprintf(
+		"module.%s.%s",
+		strings.Join(i.ModulePath[1:], "."),
+		i.Id)
 }
 
 // ResourceConfig holds the configuration given for a resource. This is
@@ -64,7 +93,7 @@ type ResourceConfig struct {
 // NewResourceConfig creates a new ResourceConfig from a config.RawConfig.
 func NewResourceConfig(c *config.RawConfig) *ResourceConfig {
 	result := &ResourceConfig{raw: c}
-	result.interpolate(nil)
+	result.interpolate(nil, nil)
 	return result
 }
 
@@ -89,34 +118,14 @@ func (c *ResourceConfig) CheckSet(keys []string) []error {
 // The second return value is true if the get was successful. Get will
 // not succeed if the value is being computed.
 func (c *ResourceConfig) Get(k string) (interface{}, bool) {
-	parts := strings.Split(k, ".")
-
-	var current interface{} = c.Raw
-	for _, part := range parts {
-		if current == nil {
-			return nil, false
-		}
-
-		cv := reflect.ValueOf(current)
-		switch cv.Kind() {
-		case reflect.Map:
-			v := cv.MapIndex(reflect.ValueOf(part))
-			if !v.IsValid() {
-				return nil, false
-			}
-			current = v.Interface()
-		case reflect.Slice:
-			i, err := strconv.ParseInt(part, 0, 0)
-			if err != nil {
-				return nil, false
-			}
-			current = cv.Index(int(i)).Interface()
-		default:
-			panic(fmt.Sprintf("Unknown kind: %s", cv.Kind()))
-		}
+	// First try to get it from c.Config since that has interpolated values
+	result, ok := c.get(k, c.Config)
+	if ok {
+		return result, ok
 	}
 
-	return current, true
+	// Otherwise, just get it from the raw config
+	return c.get(k, c.Raw)
 }
 
 // IsSet checks if the key in the configuration is set. A key is set if
@@ -143,22 +152,67 @@ func (c *ResourceConfig) IsSet(k string) bool {
 	return false
 }
 
-func (c *ResourceConfig) interpolate(ctx *Context) error {
+func (c *ResourceConfig) get(
+	k string, raw map[string]interface{}) (interface{}, bool) {
+	parts := strings.Split(k, ".")
+
+	var current interface{} = raw
+	for _, part := range parts {
+		if current == nil {
+			return nil, false
+		}
+
+		cv := reflect.ValueOf(current)
+		switch cv.Kind() {
+		case reflect.Map:
+			v := cv.MapIndex(reflect.ValueOf(part))
+			if !v.IsValid() {
+				return nil, false
+			}
+			current = v.Interface()
+		case reflect.Slice:
+			if part == "#" {
+				current = cv.Len()
+			} else {
+				i, err := strconv.ParseInt(part, 0, 0)
+				if err != nil {
+					return nil, false
+				}
+				if i >= int64(cv.Len()) {
+					return nil, false
+				}
+				current = cv.Index(int(i)).Interface()
+			}
+		default:
+			panic(fmt.Sprintf("Unknown kind: %s", cv.Kind()))
+		}
+	}
+
+	return current, true
+}
+
+func (c *ResourceConfig) interpolate(
+	ctx *walkContext, r *Resource) error {
 	if c == nil {
 		return nil
 	}
 
 	if ctx != nil {
-		if err := ctx.computeVars(c.raw); err != nil {
+		if err := ctx.computeVars(c.raw, r); err != nil {
 			return err
 		}
 	}
 
-	if c.raw != nil {
-		c.ComputedKeys = c.raw.UnknownKeys()
-		c.Raw = c.raw.Raw
-		c.Config = c.raw.Config()
+	if c.raw == nil {
+		var err error
+		c.raw, err = config.NewRawConfig(make(map[string]interface{}))
+		if err != nil {
+			return err
+		}
 	}
 
+	c.ComputedKeys = c.raw.UnknownKeys()
+	c.Raw = c.raw.Raw
+	c.Config = c.raw.Config()
 	return nil
 }

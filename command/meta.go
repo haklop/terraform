@@ -1,11 +1,14 @@
 package command
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
-	"github.com/hashicorp/terraform/config"
+	"github.com/hashicorp/terraform/config/module"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/mitchellh/cli"
 	"github.com/mitchellh/colorstring"
@@ -25,7 +28,10 @@ type Meta struct {
 	extraHooks []terraform.Hook
 
 	// Variables for the context (private)
-	variables map[string]string
+	autoKey       string
+	autoVariables map[string]string
+	input         bool
+	variables     map[string]string
 
 	color bool
 	oldUi cli.Ui
@@ -42,11 +48,11 @@ func (m *Meta) Colorize() *colorstring.Colorize {
 
 // Context returns a Terraform Context taking into account the context
 // options used to initialize this meta configuration.
-func (m *Meta) Context(path, statePath string) (*terraform.Context, bool, error) {
+func (m *Meta) Context(copts contextOpts) (*terraform.Context, bool, error) {
 	opts := m.contextOpts()
 
 	// First try to just read the plan directly from the path given.
-	f, err := os.Open(path)
+	f, err := os.Open(copts.Path)
 	if err == nil {
 		plan, err := terraform.ReadPlan(f)
 		f.Close()
@@ -65,8 +71,8 @@ func (m *Meta) Context(path, statePath string) (*terraform.Context, bool, error)
 
 	// Load up the state
 	var state *terraform.State
-	if statePath != "" {
-		f, err := os.Open(statePath)
+	if copts.StatePath != "" {
+		f, err := os.Open(copts.StatePath)
 		if err != nil && os.IsNotExist(err) {
 			// If the state file doesn't exist, it is okay, since it
 			// is probably a new infrastructure.
@@ -84,18 +90,34 @@ func (m *Meta) Context(path, statePath string) (*terraform.Context, bool, error)
 	// Store the loaded state
 	m.state = state
 
-	config, err := config.LoadDir(path)
+	// Load the root module
+	mod, err := module.NewTreeModule("", copts.Path)
 	if err != nil {
 		return nil, false, fmt.Errorf("Error loading config: %s", err)
 	}
-	if err := config.Validate(); err != nil {
-		return nil, false, fmt.Errorf("Error validating config: %s", err)
+	err = mod.Load(m.moduleStorage(copts.Path), copts.GetMode)
+	if err != nil {
+		return nil, false, fmt.Errorf("Error downloading modules: %s", err)
 	}
 
-	opts.Config = config
+	opts.Module = mod
 	opts.State = state
 	ctx := terraform.NewContext(opts)
 	return ctx, false, nil
+}
+
+// InputEnabled returns true if we should ask for input for context.
+func (m *Meta) InputEnabled() bool {
+	return !test && m.input &&
+		len(m.variables) == 0 &&
+		m.autoKey == ""
+}
+
+// UIInput returns a UIInput object to be used for asking for input.
+func (m *Meta) UIInput() terraform.UIInput {
+	return &UIInput{
+		Colorize: m.Colorize(),
+	}
 }
 
 // contextOpts returns the options to use to initialize a Terraform
@@ -109,16 +131,18 @@ func (m *Meta) contextOpts() *terraform.ContextOpts {
 	copy(opts.Hooks[1:], m.ContextOpts.Hooks)
 	copy(opts.Hooks[len(m.ContextOpts.Hooks)+1:], m.extraHooks)
 
-	if len(m.variables) > 0 {
-		vs := make(map[string]string)
-		for k, v := range opts.Variables {
-			vs[k] = v
-		}
-		for k, v := range m.variables {
-			vs[k] = v
-		}
-		opts.Variables = vs
+	vs := make(map[string]string)
+	for k, v := range opts.Variables {
+		vs[k] = v
 	}
+	for k, v := range m.autoVariables {
+		vs[k] = v
+	}
+	for k, v := range m.variables {
+		vs[k] = v
+	}
+	opts.Variables = vs
+	opts.UIInput = m.UIInput()
 
 	return &opts
 }
@@ -126,14 +150,46 @@ func (m *Meta) contextOpts() *terraform.ContextOpts {
 // flags adds the meta flags to the given FlagSet.
 func (m *Meta) flagSet(n string) *flag.FlagSet {
 	f := flag.NewFlagSet(n, flag.ContinueOnError)
+	f.BoolVar(&m.input, "input", true, "input")
 	f.Var((*FlagVar)(&m.variables), "var", "variables")
 	f.Var((*FlagVarFile)(&m.variables), "var-file", "variable file")
+
+	if m.autoKey != "" {
+		f.Var((*FlagVarFile)(&m.autoVariables), m.autoKey, "variable file")
+	}
+
+	// Create an io.Writer that writes to our Ui properly for errors.
+	// This is kind of a hack, but it does the job. Basically: create
+	// a pipe, use a scanner to break it into lines, and output each line
+	// to the UI. Do this forever.
+	errR, errW := io.Pipe()
+	errScanner := bufio.NewScanner(errR)
+	go func() {
+		for errScanner.Scan() {
+			m.Ui.Error(errScanner.Text())
+		}
+	}()
+	f.SetOutput(errW)
+
 	return f
+}
+
+// moduleStorage returns the module.Storage implementation used to store
+// modules for commands.
+func (m *Meta) moduleStorage(root string) module.Storage {
+	return &uiModuleStorage{
+		Storage: &module.FolderStorage{
+			StorageDir: filepath.Join(root, "modules"),
+		},
+		Ui: m.Ui,
+	}
 }
 
 // process will process the meta-parameters out of the arguments. This
 // will potentially modify the args in-place. It will return the resulting
 // slice.
+//
+// vars says whether or not we support variables.
 func (m *Meta) process(args []string, vars bool) []string {
 	// We do this so that we retain the ability to technically call
 	// process multiple times, even if we have no plans to do so
@@ -145,7 +201,7 @@ func (m *Meta) process(args []string, vars bool) []string {
 	m.color = m.Color
 	for i, v := range args {
 		if v == "-no-color" {
-			m.Color = false
+			m.color = false
 			args = append(args[:i], args[i+1:]...)
 			break
 		}
@@ -153,19 +209,23 @@ func (m *Meta) process(args []string, vars bool) []string {
 
 	// Set the UI
 	m.oldUi = m.Ui
-	m.Ui = &ColorizeUi{
-		Colorize:   m.Colorize(),
-		ErrorColor: "[red]",
-		Ui:         m.oldUi,
+	m.Ui = &cli.ConcurrentUi{
+		Ui: &ColorizeUi{
+			Colorize:   m.Colorize(),
+			ErrorColor: "[red]",
+			Ui:         m.oldUi,
+		},
 	}
 
 	// If we support vars and the default var file exists, add it to
 	// the args...
+	m.autoKey = ""
 	if vars {
 		if _, err := os.Stat(DefaultVarsFilename); err == nil {
+			m.autoKey = "var-file-default"
 			args = append(args, "", "")
 			copy(args[2:], args[0:])
-			args[0] = "-var-file"
+			args[0] = "-" + m.autoKey
 			args[1] = DefaultVarsFilename
 		}
 	}
@@ -179,4 +239,19 @@ func (m *Meta) uiHook() *UiHook {
 		Colorize: m.Colorize(),
 		Ui:       m.Ui,
 	}
+}
+
+// contextOpts are the options used to load a context from a command.
+type contextOpts struct {
+	// Path to the directory where the root module is.
+	Path string
+
+	// StatePath is the path to the state file. If this is empty, then
+	// no state will be loaded. It is also okay for this to be a path to
+	// a file that doesn't exist; it is assumed that this means that there
+	// is simply no state.
+	StatePath string
+
+	// GetMode is the module.GetMode to use when loading the module tree.
+	GetMode module.GetMode
 }

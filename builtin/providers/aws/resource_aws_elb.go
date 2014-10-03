@@ -13,9 +13,9 @@ import (
 )
 
 func resource_aws_elb_create(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	elbconn := p.elbconn
 
@@ -41,10 +41,23 @@ func resource_aws_elb_create(
 		Listeners:        listeners,
 	}
 
+	if rs.Attributes["internal"] == "true" {
+		elbOpts.Internal = true
+	}
+
 	if _, ok := rs.Attributes["availability_zones.#"]; ok {
 		v = flatmap.Expand(rs.Attributes, "availability_zones").([]interface{})
-		zones := expandStringList(v)
-		elbOpts.AvailZone = zones
+		elbOpts.AvailZone = expandStringList(v)
+	}
+
+	if _, ok := rs.Attributes["security_groups.#"]; ok {
+		v = flatmap.Expand(rs.Attributes, "security_groups").([]interface{})
+		elbOpts.SecurityGroups = expandStringList(v)
+	}
+
+	if _, ok := rs.Attributes["subnets.#"]; ok {
+		v = flatmap.Expand(rs.Attributes, "subnets").([]interface{})
+		elbOpts.Subnets = expandStringList(v)
 	}
 
 	log.Printf("[DEBUG] ELB create configuration: %#v", elbOpts)
@@ -115,9 +128,9 @@ func resource_aws_elb_create(
 }
 
 func resource_aws_elb_update(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	elbconn := p.elbconn
 
@@ -205,7 +218,7 @@ func resource_aws_elb_update(
 }
 
 func resource_aws_elb_destroy(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	meta interface{}) error {
 	p := meta.(*ResourceProvider)
 	elbconn := p.elbconn
@@ -226,8 +239,8 @@ func resource_aws_elb_destroy(
 }
 
 func resource_aws_elb_refresh(
-	s *terraform.ResourceState,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	elbconn := p.elbconn
 
@@ -240,17 +253,20 @@ func resource_aws_elb_refresh(
 }
 
 func resource_aws_elb_diff(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	c *terraform.ResourceConfig,
-	meta interface{}) (*terraform.ResourceDiff, error) {
+	meta interface{}) (*terraform.InstanceDiff, error) {
 
 	b := &diff.ResourceBuilder{
 		Attrs: map[string]diff.AttrType{
 			"name":              diff.AttrTypeCreate,
 			"availability_zone": diff.AttrTypeCreate,
+			"security_groups":   diff.AttrTypeCreate, // TODO could be AttrTypeUpdate
+			"subnets":           diff.AttrTypeCreate, // TODO could be AttrTypeUpdate
 			"listener":          diff.AttrTypeCreate,
 			"instances":         diff.AttrTypeUpdate,
 			"health_check":      diff.AttrTypeCreate,
+			"internal":          diff.AttrTypeCreate,
 		},
 
 		ComputedAttrs: []string{
@@ -262,17 +278,29 @@ func resource_aws_elb_diff(
 }
 
 func resource_aws_elb_update_state(
-	s *terraform.ResourceState,
-	balancer *elb.LoadBalancer) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	balancer *elb.LoadBalancer) (*terraform.InstanceState, error) {
 
 	s.Attributes["name"] = balancer.LoadBalancerName
 	s.Attributes["dns_name"] = balancer.DNSName
+
+	if balancer.Scheme == "internal" {
+		s.Attributes["internal"] = "true"
+	}
 
 	// Flatten our group values
 	toFlatten := make(map[string]interface{})
 
 	if len(balancer.Instances) > 0 && balancer.Instances[0].InstanceId != "" {
 		toFlatten["instances"] = flattenInstances(balancer.Instances)
+	}
+
+	if len(balancer.SecurityGroups) > 0 && balancer.SecurityGroups[0] != "" {
+		toFlatten["security_groups"] = balancer.SecurityGroups
+	}
+
+	if len(balancer.Subnets) > 0 && balancer.Subnets[0] != "" {
+		toFlatten["subnets"] = balancer.Subnets
 	}
 
 	// There's only one health check, so save that to state as we
@@ -325,7 +353,11 @@ func resource_aws_elb_validation() *config.Validator {
 		},
 		Optional: []string{
 			"instances.*",
+			"listener.*.ssl_certificate_id",
+			"internal",
 			"availability_zones.*",
+			"security_groups.*",
+			"subnets.*",
 			"health_check.#",
 			"health_check.0.healthy_threshold",
 			"health_check.0.unhealthy_threshold",

@@ -52,6 +52,13 @@ func TestResourceProvider_Configure(t *testing.T) {
 	if !reflect.DeepEqual(rp.Config, expected) {
 		t.Fatalf("bad: %#v", rp.Config)
 	}
+
+	if rp.p == nil {
+		t.Fatal("provider should be set")
+	}
+	if !reflect.DeepEqual(rp, rp.p.Meta()) {
+		t.Fatalf("meta should be set")
+	}
 }
 
 func TestResourceProvider_ConfigureBadRegion(t *testing.T) {
@@ -84,5 +91,8 @@ func testAccPreCheck(t *testing.T) {
 	if v := os.Getenv("AWS_REGION"); v == "" {
 		log.Println("[INFO] Test: Using us-west-2 as test region")
 		os.Setenv("AWS_REGION", "us-west-2")
+	}
+	if v := os.Getenv("AWS_SSL_CERTIFICATE_ID"); v == "" {
+		t.Fatal("AWS_SSL_CERTIFICATE_ID must be set for acceptance tests")
 	}
 }

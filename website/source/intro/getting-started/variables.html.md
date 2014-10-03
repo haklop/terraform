@@ -72,9 +72,11 @@ access_key = "foo"
 secret_key = "bar"
 ```
 
-If a "terraform.tfvars" file is present, Terraform automatically loads
-it to populate variables. If the file is named something else, you can
-use the `-var-file` flag directly to specify a file.
+If a "terraform.tfvars" file is present in the current directory,
+Terraform automatically loads it to populate variables. If the file is
+named something else, you can use the `-var-file` flag directly to
+specify a file. Like configuration files, variable files can also be
+JSON.
 
 We recommend using the "terraform.tfvars" file, and ignoring it from
 version control.
@@ -94,8 +96,8 @@ support for the "us-west-2" region as well:
 ```
 variable "amis" {
 	default = {
-		"us-east-1": "ami-aa7ab6c2",
-		"us-west-2": "ami-23f78e13",
+		us-east-1 = "ami-aa7ab6c2"
+		us-west-2 = "ami-23f78e13"
 	}
 }
 ```
@@ -133,7 +135,7 @@ $ terraform plan -var 'amis.us-east-1=foo'
 ## Next
 
 Terraform provides variables for parameterizing your configurations.
-Mappings let you build lookup tables in cases where that make sense.
+Mappings let you build lookup tables in cases where that makes sense.
 Setting and using variables is uniform throughout your configurations.
 
 In the next section, we'll take a look at

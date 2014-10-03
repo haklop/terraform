@@ -33,6 +33,11 @@ func expandListeners(configured []interface{}) ([]elb.Listener, error) {
 			Protocol:         newL["lb_protocol"].(string),
 		}
 
+		if attr, ok := newL["ssl_certificate_id"].(string); ok {
+			l.SSLCertificateId = attr
+		}
+
+
 		listeners = append(listeners, l)
 	}
 
@@ -41,64 +46,54 @@ func expandListeners(configured []interface{}) ([]elb.Listener, error) {
 
 // Takes the result of flatmap.Expand for an array of ingress/egress
 // security group rules and returns EC2 API compatible objects
-func expandIPPerms(configured []interface{}) ([]ec2.IPPerm, error) {
-	perms := make([]ec2.IPPerm, 0, len(configured))
+func expandIPPerms(id string, configured []interface{}) []ec2.IPPerm {
+	perms := make([]ec2.IPPerm, len(configured))
+	for i, mRaw := range configured {
+		var perm ec2.IPPerm
+		m := mRaw.(map[string]interface{})
 
-	// Loop over our configured permissions and create
-	// an array of goamz/ec2 compatabile objects
-	for _, perm := range configured {
-		// Our permission object
-		newP := perm.(map[string]interface{})
+		perm.FromPort = m["from_port"].(int)
+		perm.ToPort = m["to_port"].(int)
+		perm.Protocol = m["protocol"].(string)
 
-		// Our new returned goamz compatible permission
-		p := ec2.IPPerm{}
-
-		// Ports
-		if attr, ok := newP["from_port"].(string); ok {
-			fromPort, err := strconv.Atoi(attr)
-			if err != nil {
-				return nil, err
+		var groups []string
+		if raw, ok := m["security_groups"]; ok {
+			list := raw.([]interface{})
+			for _, v := range list {
+				groups = append(groups, v.(string))
 			}
-			p.FromPort = fromPort
+		}
+		if v, ok := m["self"]; ok && v.(bool) {
+			groups = append(groups, id)
 		}
 
-		if attr, ok := newP["to_port"].(string); ok {
-			toPort, err := strconv.Atoi(attr)
-			if err != nil {
-				return nil, err
-			}
-			p.ToPort = toPort
-		}
-
-		if attr, ok := newP["protocol"].(string); ok {
-			p.Protocol = attr
-		}
-
-		// Loop over the array of sg ids and built
-		// compatibile goamz objects
-		if secGroups, ok := newP["security_groups"].([]interface{}); ok {
-			expandedGroups := []ec2.UserSecurityGroup{}
-			gs := expandStringList(secGroups)
-
-			for _, g := range gs {
-				newG := ec2.UserSecurityGroup{
-					Id: g,
+		if len(groups) > 0 {
+			perm.SourceGroups = make([]ec2.UserSecurityGroup, len(groups))
+			for i, name := range groups {
+				ownerId, id := "", name
+				if items := strings.Split(id, "/"); len(items) > 1 {
+					ownerId, id = items[0], items[1]
 				}
-				expandedGroups = append(expandedGroups, newG)
+
+				perm.SourceGroups[i] = ec2.UserSecurityGroup{
+					Id:      id,
+					OwnerId: ownerId,
+				}
 			}
-
-			p.SourceGroups = expandedGroups
 		}
 
-		// Expand CIDR blocks
-		if cidrBlocks, ok := newP["cidr_blocks"].([]interface{}); ok {
-			p.SourceIPs = expandStringList(cidrBlocks)
+		if raw, ok := m["cidr_blocks"]; ok {
+			list := raw.([]interface{})
+			perm.SourceIPs = make([]string, len(list))
+			for i, v := range list {
+				perm.SourceIPs[i] = v.(string)
+			}
 		}
 
-		perms = append(perms, p)
+		perms[i] = perm
 	}
 
-	return perms, nil
+	return perms
 }
 
 // Flattens an array of ipPerms into a list of primitives that

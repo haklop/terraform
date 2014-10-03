@@ -38,15 +38,6 @@ func init() {
 				Refresh:         resource_aws_db_security_group_refresh,
 			},
 
-			"aws_eip": resource.Resource{
-				ConfigValidator: resource_aws_eip_validation(),
-				Create:          resource_aws_eip_create,
-				Destroy:         resource_aws_eip_destroy,
-				Diff:            resource_aws_eip_diff,
-				Refresh:         resource_aws_eip_refresh,
-				Update:          resource_aws_eip_update,
-			},
-
 			"aws_elb": resource.Resource{
 				ConfigValidator: resource_aws_elb_validation(),
 				Create:          resource_aws_elb_create,
@@ -54,14 +45,6 @@ func init() {
 				Destroy:         resource_aws_elb_destroy,
 				Diff:            resource_aws_elb_diff,
 				Refresh:         resource_aws_elb_refresh,
-			},
-
-			"aws_instance": resource.Resource{
-				Create:  resource_aws_instance_create,
-				Destroy: resource_aws_instance_destroy,
-				Diff:    resource_aws_instance_diff,
-				Refresh: resource_aws_instance_refresh,
-				Update:  resource_aws_instance_update,
 			},
 
 			"aws_internet_gateway": resource.Resource{
@@ -137,14 +120,6 @@ func init() {
 				Refresh:         resource_aws_s3_bucket_refresh,
 			},
 
-			"aws_security_group": resource.Resource{
-				ConfigValidator: resource_aws_security_group_validation(),
-				Create:          resource_aws_security_group_create,
-				Destroy:         resource_aws_security_group_destroy,
-				Diff:            resource_aws_security_group_diff,
-				Refresh:         resource_aws_security_group_refresh,
-			},
-
 			"aws_subnet": resource.Resource{
 				Create:  resource_aws_subnet_create,
 				Destroy: resource_aws_subnet_destroy,
@@ -157,6 +132,7 @@ func init() {
 				Destroy: resource_aws_vpc_destroy,
 				Diff:    resource_aws_vpc_diff,
 				Refresh: resource_aws_vpc_refresh,
+				Update:  resource_aws_vpc_update,
 			},
 		},
 	}

@@ -20,6 +20,31 @@ func TestNewInterpolatedVariable(t *testing.T) {
 			},
 			false,
 		},
+		{
+			"module.foo.bar",
+			&ModuleVariable{
+				Name:  "foo",
+				Field: "bar",
+				key:   "module.foo.bar",
+			},
+			false,
+		},
+		{
+			"count.index",
+			&CountVariable{
+				Type: CountValueIndex,
+				key:  "count.index",
+			},
+			false,
+		},
+		{
+			"count.nope",
+			&CountVariable{
+				Type: CountValueInvalid,
+				key:  "count.nope",
+			},
+			false,
+		},
 	}
 
 	for i, tc := range cases {

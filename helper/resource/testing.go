@@ -6,10 +6,11 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/config"
+	"github.com/hashicorp/terraform/config/module"
 	"github.com/hashicorp/terraform/terraform"
 )
 
@@ -149,22 +150,19 @@ func testStep(
 	opts terraform.ContextOpts,
 	state *terraform.State,
 	step TestStep) (*terraform.State, error) {
-	// Write the configuration
-	cfgF, err := ioutil.TempFile("", "tf-test")
+	cfgPath, err := ioutil.TempDir("", "tf-test")
 	if err != nil {
 		return state, fmt.Errorf(
-			"Error creating temporary file for config: %s", err)
+			"Error creating temporary directory for config: %s", err)
 	}
-	cfgPath := cfgF.Name() + ".tf"
-	cfgF.Close()
-	os.Remove(cfgF.Name())
+	defer os.RemoveAll(cfgPath)
 
-	cfgF, err = os.Create(cfgPath)
+	// Write the configuration
+	cfgF, err := os.Create(filepath.Join(cfgPath, "main.tf"))
 	if err != nil {
 		return state, fmt.Errorf(
 			"Error creating temporary file for config: %s", err)
 	}
-	defer os.Remove(cfgPath)
 
 	_, err = io.Copy(cfgF, strings.NewReader(step.Config))
 	cfgF.Close()
@@ -174,14 +172,23 @@ func testStep(
 	}
 
 	// Parse the configuration
-	config, err := config.Load(cfgPath)
+	mod, err := module.NewTreeModule("", cfgPath)
 	if err != nil {
 		return state, fmt.Errorf(
-			"Error parsing configuration: %s", err)
+			"Error loading configuration: %s", err)
+	}
+
+	// Load the modules
+	modStorage := &module.FolderStorage{
+		StorageDir: filepath.Join(cfgPath, ".tfmodules"),
+	}
+	err = mod.Load(modStorage, module.GetModeGet)
+	if err != nil {
+		return state, fmt.Errorf("Error downloading modules: %s", err)
 	}
 
 	// Build the context
-	opts.Config = config
+	opts.Module = mod
 	opts.State = state
 	ctx := terraform.NewContext(&opts)
 	if ws, es := ctx.Validate(); len(ws) > 0 || len(es) > 0 {
@@ -244,18 +251,24 @@ func ComposeTestCheckFunc(fs ...TestCheckFunc) TestCheckFunc {
 
 func TestCheckResourceAttr(name, key, value string) TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.Resources[name]
+		ms := s.RootModule()
+		rs, ok := ms.Resources[name]
 		if !ok {
 			return fmt.Errorf("Not found: %s", name)
 		}
 
-		if rs.Attributes[key] != value {
+		is := rs.Primary
+		if is == nil {
+			return fmt.Errorf("No primary instance: %s", name)
+		}
+
+		if is.Attributes[key] != value {
 			return fmt.Errorf(
 				"%s: Attribute '%s' expected %#v, got %#v",
 				name,
 				key,
 				value,
-				rs.Attributes[key])
+				is.Attributes[key])
 		}
 
 		return nil

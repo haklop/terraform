@@ -87,6 +87,22 @@ func TestInterpolationWalker_detect(t *testing.T) {
 				},
 			},
 		},
+
+		{
+			Input: map[string]interface{}{
+				"foo": `${file("foo/bar.txt")}`,
+			},
+			Result: []Interpolation{
+				&FunctionInterpolation{
+					Func: nil,
+					Args: []Interpolation{
+						&LiteralInterpolation{
+							Literal: "foo/bar.txt",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for i, tc := range cases {
@@ -136,6 +152,19 @@ func TestInterpolationWalker_replace(t *testing.T) {
 			},
 			Output: map[string]interface{}{
 				"foo": "hello, bar",
+			},
+		},
+
+		{
+			Input: map[string]interface{}{
+				"foo": map[string]interface{}{
+					"${var.foo}": "bar",
+				},
+			},
+			Output: map[string]interface{}{
+				"foo": map[string]interface{}{
+					"bar": "bar",
+				},
 			},
 		},
 	}

@@ -163,7 +163,11 @@ func (g *Graph) String() string {
 	}
 	sort.Strings(keys)
 
-	buf.WriteString(fmt.Sprintf("root: %s\n", g.Root.Name))
+	if g.Root != nil {
+		buf.WriteString(fmt.Sprintf("root: %s\n", g.Root.Name))
+	} else {
+		buf.WriteString("root: <unknown>\n")
+	}
 	for _, k := range keys {
 		n := mapping[k]
 		buf.WriteString(fmt.Sprintf("%s\n", n.Name))
@@ -269,7 +273,6 @@ func (g *Graph) Walk(fn WalkFunc) error {
 
 	// Spawn off all our goroutines to walk the tree
 	errCh := make(chan error)
-	quitCh := make(chan struct{})
 	for len(tovisit) > 0 {
 		// Grab the current thing to use
 		n := len(tovisit)
@@ -301,11 +304,8 @@ func (g *Graph) Walk(fn WalkFunc) error {
 				ch := seenMap[dep.Target]
 				seenMapL.RUnlock()
 
-				select {
-				case <-ch:
-				case <-quitCh:
-					return
-				}
+				// Wait for the dep to be run
+				<-ch
 
 				// Check if any dependencies errored. If so,
 				// then return right away, we won't walk it.
@@ -343,9 +343,6 @@ func (g *Graph) Walk(fn WalkFunc) error {
 	case <-doneCh:
 		return nil
 	case err := <-errCh:
-		// Close the quit channel so all our goroutines will end now
-		close(quitCh)
-
 		// Drain the error channel
 		go func() {
 			for _ = range errCh {
@@ -359,4 +356,24 @@ func (g *Graph) Walk(fn WalkFunc) error {
 
 		return err
 	}
+}
+
+// DependsOn returns the set of nouns that have a
+// dependency on a given noun. This can be used to find
+// the incoming edges to a noun.
+func (g *Graph) DependsOn(n *Noun) []*Noun {
+	var incoming []*Noun
+OUTER:
+	for _, other := range g.Nouns {
+		if other == n {
+			continue
+		}
+		for _, d := range other.Deps {
+			if d.Target == n {
+				incoming = append(incoming, other)
+				continue OUTER
+			}
+		}
+	}
+	return incoming
 }

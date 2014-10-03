@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hashicorp/terraform/config/module"
 	"github.com/hashicorp/terraform/terraform"
 )
 
@@ -13,6 +14,8 @@ import (
 var fixtureDir = "./test-fixtures"
 
 func init() {
+	test = true
+
 	// Expand the fixture dir on init because we change the working
 	// directory in some tests.
 	var err error
@@ -20,6 +23,18 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func tempDir(t *testing.T) string {
+	dir, err := ioutil.TempDir("", "tf")
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	return dir
 }
 
 func testFixturePath(name string) string {
@@ -34,6 +49,20 @@ func testCtxConfig(p terraform.ResourceProvider) *terraform.ContextOpts {
 			},
 		},
 	}
+}
+
+func testModule(t *testing.T, name string) *module.Tree {
+	mod, err := module.NewTreeModule("", filepath.Join(fixtureDir, name))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	s := &module.FolderStorage{StorageDir: tempDir(t)}
+	if err := mod.Load(s, module.GetModeGet); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	return mod
 }
 
 func testPlanFile(t *testing.T, plan *terraform.Plan) string {
@@ -67,6 +96,25 @@ func testReadPlan(t *testing.T, path string) *terraform.Plan {
 	return p
 }
 
+// testState returns a test State structure that we use for a lot of tests.
+func testState() *terraform.State {
+	return &terraform.State{
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func testStateFile(t *testing.T, s *terraform.State) string {
 	path := testTempFile(t)
 
@@ -85,9 +133,10 @@ func testStateFile(t *testing.T, s *terraform.State) string {
 
 func testProvider() *terraform.MockResourceProvider {
 	p := new(terraform.MockResourceProvider)
-	p.DiffReturn = &terraform.ResourceDiff{}
+	p.DiffReturn = &terraform.InstanceDiff{}
 	p.RefreshFn = func(
-		s *terraform.ResourceState) (*terraform.ResourceState, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState) (*terraform.InstanceState, error) {
 		return s, nil
 	}
 	p.ResourcesReturn = []terraform.ResourceType{

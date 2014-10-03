@@ -16,9 +16,9 @@ import (
 )
 
 func resource_aws_db_instance_create(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	conn := p.rdsconn
 
@@ -73,6 +73,10 @@ func resource_aws_db_instance_create(
 
 	if attr = rs.Attributes["publicly_accessible"]; attr == "true" {
 		opts.PubliclyAccessible = true
+	}
+
+	if attr = rs.Attributes["subnet_group_name"]; attr != "" {
+		opts.DBSubnetGroupName = attr
 	}
 
 	if err != nil {
@@ -136,17 +140,14 @@ func resource_aws_db_instance_create(
 }
 
 func resource_aws_db_instance_update(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
-
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
 	panic("Cannot update DB")
-
-	return nil, nil
 }
 
 func resource_aws_db_instance_destroy(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	meta interface{}) error {
 	p := meta.(*ResourceProvider)
 	conn := p.rdsconn
@@ -187,8 +188,8 @@ func resource_aws_db_instance_destroy(
 }
 
 func resource_aws_db_instance_refresh(
-	s *terraform.ResourceState,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	conn := p.rdsconn
 
@@ -197,14 +198,18 @@ func resource_aws_db_instance_refresh(
 	if err != nil {
 		return s, err
 	}
+	if v == nil {
+		s.ID = ""
+		return s, nil
+	}
 
 	return resource_aws_db_instance_update_state(s, v)
 }
 
 func resource_aws_db_instance_diff(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	c *terraform.ResourceConfig,
-	meta interface{}) (*terraform.ResourceDiff, error) {
+	meta interface{}) (*terraform.InstanceDiff, error) {
 
 	b := &diff.ResourceBuilder{
 		Attrs: map[string]diff.AttrType{
@@ -226,6 +231,7 @@ func resource_aws_db_instance_diff(
 			"username":                  diff.AttrTypeCreate,
 			"vpc_security_group_ids":    diff.AttrTypeCreate,
 			"security_group_names":      diff.AttrTypeCreate,
+			"subnet_group_name":         diff.AttrTypeCreate,
 			"skip_final_snapshot":       diff.AttrTypeUpdate,
 			"final_snapshot_identifier": diff.AttrTypeUpdate,
 		},
@@ -250,8 +256,8 @@ func resource_aws_db_instance_diff(
 }
 
 func resource_aws_db_instance_update_state(
-	s *terraform.ResourceState,
-	v *rds.DBInstance) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	v *rds.DBInstance) (*terraform.InstanceState, error) {
 
 	s.Attributes["address"] = v.Address
 	s.Attributes["allocated_storage"] = strconv.Itoa(v.AllocatedStorage)
@@ -268,6 +274,7 @@ func resource_aws_db_instance_update_state(
 	s.Attributes["port"] = strconv.Itoa(v.Port)
 	s.Attributes["status"] = v.DBInstanceStatus
 	s.Attributes["username"] = v.MasterUsername
+	s.Attributes["subnet_group_name"] = v.DBSubnetGroup.Name
 
 	// Flatten our group values
 	toFlatten := make(map[string]interface{})
@@ -280,13 +287,6 @@ func resource_aws_db_instance_update_state(
 	}
 	for k, v := range flatmap.Flatten(toFlatten) {
 		s.Attributes[k] = v
-	}
-
-	// We depend on any security groups attached
-	for _, g := range v.DBSecurityGroupNames {
-		s.Dependencies = []terraform.ResourceDependency{
-			terraform.ResourceDependency{ID: g},
-		}
 	}
 
 	return s, nil
@@ -302,13 +302,16 @@ func resource_aws_db_instance_retrieve(id string, conn *rds.Rds) (*rds.DBInstanc
 	resp, err := conn.DescribeDBInstances(&opts)
 
 	if err != nil {
+		if strings.Contains(err.Error(), "DBInstanceNotFound") {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("Error retrieving DB Instances: %s", err)
 	}
 
 	if len(resp.DBInstances) != 1 ||
 		resp.DBInstances[0].DBInstanceIdentifier != id {
 		if err != nil {
-			return nil, fmt.Errorf("Unable to find DB Instance: %#v", resp.DBInstances)
+			return nil, nil
 		}
 	}
 
@@ -341,6 +344,7 @@ func resource_aws_db_instance_validation() *config.Validator {
 			"vpc_security_group_ids.*",
 			"skip_final_snapshot",
 			"security_group_names.*",
+			"subnet_group_name",
 		},
 	}
 }
@@ -350,14 +354,12 @@ func DBInstanceStateRefreshFunc(id string, conn *rds.Rds) resource.StateRefreshF
 		v, err := resource_aws_db_instance_retrieve(id, conn)
 
 		if err != nil {
-			// We want to special-case "not found" instances because
-			// it could be waiting for it to be gone.
-			if strings.Contains(err.Error(), "DBInstanceNotFound") {
-				return nil, "", nil
-			}
-
 			log.Printf("Error on retrieving DB Instance when waiting: %s", err)
 			return nil, "", err
+		}
+
+		if v == nil {
+			return nil, "", nil
 		}
 
 		return v, v.DBInstanceStatus, nil

@@ -9,6 +9,7 @@ import (
 func TestNewRawConfig(t *testing.T) {
 	raw := map[string]interface{}{
 		"foo": "${var.bar}",
+		"bar": `${file("boom.txt")}`,
 	}
 
 	rc, err := NewRawConfig(raw)
@@ -16,6 +17,9 @@ func TestNewRawConfig(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 
+	if len(rc.Interpolations) != 2 {
+		t.Fatalf("bad: %#v", rc.Interpolations)
+	}
 	if len(rc.Variables) != 1 {
 		t.Fatalf("bad: %#v", rc.Variables)
 	}
@@ -118,6 +122,36 @@ func TestRawConfig_unknown(t *testing.T) {
 	expectedKeys := []string{"foo"}
 	if !reflect.DeepEqual(rc.UnknownKeys(), expectedKeys) {
 		t.Fatalf("bad: %#v", rc.UnknownKeys())
+	}
+}
+
+func TestRawConfigValue(t *testing.T) {
+	raw := map[string]interface{}{
+		"foo": "${var.bar}",
+	}
+
+	rc, err := NewRawConfig(raw)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	rc.Key = ""
+	if rc.Value() != nil {
+		t.Fatalf("bad: %#v", rc.Value())
+	}
+
+	rc.Key = "foo"
+	if rc.Value() != "${var.bar}" {
+		t.Fatalf("err: %#v", rc.Value())
+	}
+
+	vars := map[string]string{"var.bar": "baz"}
+	if err := rc.Interpolate(vars); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if rc.Value() != "baz" {
+		t.Fatalf("bad: %#v", rc.Value())
 	}
 }
 

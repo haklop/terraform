@@ -23,6 +23,14 @@ resource "aws_elb" "bar" {
     lb_protocol = "http"
   }
 
+  listener {
+    instance_port = 8000
+    instance_protocol = "http"
+    lb_port = 443
+    lb_protocol = "https"
+    ssl_certificate_id = "arn:aws:iam::123456789012:server-certificate/certName" 
+  }
+
   health_check {
     healthy_threshold = 2
     unhealthy_threshold = 2
@@ -41,9 +49,12 @@ The following arguments are supported:
 
 * `name` - (Required) The name of the ELB
 * `availability_zones` - (Optional) The AZ's to serve traffic in.
+* `security_groups` - (Optional) A list of security group IDs to assign to the ELB.
+* `subnets` - (Optional) A list of subnets to attach to the ELB.
 * `instances` - (Optional) A list of instance ids to place in the ELB pool.
+* `internal` - (Optional) If true, ELB will be an internal ELB.
 * `listener` - (Required) A list of listener blocks. Listeners documented below.
-* `health_check` - (Required) A health_check block. Health Check documented below.
+* `health_check` - (Optional) A health_check block. Health Check documented below.
 
 Listeners support the following:
 
@@ -51,6 +62,7 @@ Listeners support the following:
 * `instance_protocol` - (Required) The the protocol to use to the instance.
 * `lb_port` - (Required) The port to listen on for the load balancer
 * `lb_protocol` - (Required) The protocol to listen on.
+* `ssl_certificate_id` - (Optional) The id of an SSL certificate you have uploaded to AWS IAM.
 
 Health Check supports the following:
 
@@ -59,7 +71,6 @@ Health Check supports the following:
 * `target` - (Required) The target of the check.
 * `interval` - (Required) The interval between checks.
 * `timeout` - (Required) The length of time before the check times out.
-
 
 ## Attributes Reference
 

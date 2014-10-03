@@ -2,6 +2,7 @@ package aws
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 
 func TestAccAWSELB_basic(t *testing.T) {
 	var conf elb.LoadBalancer
+	ssl_certificate_id := os.Getenv("AWS_SSL_CERTIFICATE_ID")
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -35,6 +37,8 @@ func TestAccAWSELB_basic(t *testing.T) {
 						"aws_elb.bar", "listener.0.instance_port", "8000"),
 					resource.TestCheckResourceAttr(
 						"aws_elb.bar", "listener.0.instance_protocol", "http"),
+					resource.TestCheckResourceAttr(
+						"aws_elb.bar", "listener.0.ssl_certificate_id", ssl_certificate_id),
 					resource.TestCheckResourceAttr(
 						"aws_elb.bar", "listener.0.lb_port", "80"),
 					resource.TestCheckResourceAttr(
@@ -112,18 +116,18 @@ func TestAccAWSELB_HealthCheck(t *testing.T) {
 func testAccCheckAWSELBDestroy(s *terraform.State) error {
 	conn := testAccProvider.elbconn
 
-	for _, rs := range s.Resources {
+	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "aws_elb" {
 			continue
 		}
 
 		describe, err := conn.DescribeLoadBalancers(&elb.DescribeLoadBalancer{
-			Names: []string{rs.ID},
+			Names: []string{rs.Primary.ID},
 		})
 
 		if err == nil {
 			if len(describe.LoadBalancers) != 0 &&
-				describe.LoadBalancers[0].LoadBalancerName == rs.ID {
+				describe.LoadBalancers[0].LoadBalancerName == rs.Primary.ID {
 				return fmt.Errorf("ELB still exists")
 			}
 		}
@@ -209,19 +213,19 @@ func testAccCheckAWSELBAttributesHealthCheck(conf *elb.LoadBalancer) resource.Te
 
 func testAccCheckAWSELBExists(n string, res *elb.LoadBalancer) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		rs, ok := s.Resources[n]
+		rs, ok := s.RootModule().Resources[n]
 		if !ok {
 			return fmt.Errorf("Not found: %s", n)
 		}
 
-		if rs.ID == "" {
+		if rs.Primary.ID == "" {
 			return fmt.Errorf("No ELB ID is set")
 		}
 
 		conn := testAccProvider.elbconn
 
 		describe, err := conn.DescribeLoadBalancers(&elb.DescribeLoadBalancer{
-			Names: []string{rs.ID},
+			Names: []string{rs.Primary.ID},
 		})
 
 		if err != nil {
@@ -229,7 +233,7 @@ func testAccCheckAWSELBExists(n string, res *elb.LoadBalancer) resource.TestChec
 		}
 
 		if len(describe.LoadBalancers) != 1 ||
-			describe.LoadBalancers[0].LoadBalancerName != rs.ID {
+			describe.LoadBalancers[0].LoadBalancerName != rs.Primary.ID {
 			return fmt.Errorf("ELB not found")
 		}
 
@@ -274,6 +278,21 @@ resource "aws_instance" "foo" {
 	# us-west-2
 	ami = "ami-043a5034"
 	instance_type = "t1.micro"
+}
+`
+
+const testAccAWSELBConfigListenerSSLCertificateId = `
+resource "aws_elb" "bar" {
+  name = "foobar-terraform-test"
+  availability_zones = ["us-west-2a"]
+
+  listener {
+    instance_port = 8000
+    instance_protocol = "http"
+    ssl_certificate_id = "%s"
+    lb_port = 443
+    lb_protocol = "https"
+  }
 }
 `
 

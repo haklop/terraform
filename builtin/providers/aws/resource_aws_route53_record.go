@@ -28,9 +28,9 @@ func resource_aws_r53_record_validation() *config.Validator {
 }
 
 func resource_aws_r53_record_create(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	conn := p.route53
 
@@ -44,7 +44,9 @@ func resource_aws_r53_record_create(
 		return rs, err
 	}
 
-	// Create the new records
+	// Create the new records. We abuse StateChangeConf for this to
+	// retry for us since Route53 sometimes returns errors about another
+	// operation happening at the same time.
 	req := &route53.ChangeResourceRecordSetsRequest{
 		Comment: "Managed by Terraform",
 		Changes: []route53.Change{
@@ -57,26 +59,44 @@ func resource_aws_r53_record_create(
 	zone := rs.Attributes["zone_id"]
 	log.Printf("[DEBUG] Creating resource records for zone: %s, name: %s",
 		zone, rs.Attributes["name"])
-	resp, err := conn.ChangeResourceRecordSets(zone, req)
+	wait := resource.StateChangeConf{
+		Pending:    []string{"rejected"},
+		Target:     "accepted",
+		Timeout:    5 * time.Minute,
+		MinTimeout: 1 * time.Second,
+		Refresh: func() (interface{}, string, error) {
+			resp, err := conn.ChangeResourceRecordSets(zone, req)
+			if err != nil {
+				if strings.Contains(err.Error(), "PriorRequestNotComplete") {
+					// There is some pending operation, so just retry
+					// in a bit.
+					return nil, "rejected", nil
+				}
+
+				return nil, "failure", err
+			}
+
+			return resp.ChangeInfo, "accepted", nil
+		},
+	}
+	respRaw, err := wait.WaitForState()
 	if err != nil {
 		return rs, err
 	}
+	changeInfo := respRaw.(route53.ChangeInfo)
 
 	// Generate an ID
 	rs.ID = fmt.Sprintf("%s_%s_%s", zone, rs.Attributes["name"], rs.Attributes["type"])
-	rs.Dependencies = []terraform.ResourceDependency{
-		terraform.ResourceDependency{ID: zone},
-	}
 
 	// Wait until we are done
-	wait := resource.StateChangeConf{
+	wait = resource.StateChangeConf{
 		Delay:      30 * time.Second,
 		Pending:    []string{"PENDING"},
 		Target:     "INSYNC",
 		Timeout:    10 * time.Minute,
 		MinTimeout: 5 * time.Second,
 		Refresh: func() (result interface{}, state string, err error) {
-			return resource_aws_r53_wait(conn, resp.ChangeInfo.ID)
+			return resource_aws_r53_wait(conn, changeInfo.ID)
 		},
 	}
 	_, err = wait.WaitForState()
@@ -86,7 +106,7 @@ func resource_aws_r53_record_create(
 	return rs, nil
 }
 
-func resource_aws_r53_build_record_set(s *terraform.ResourceState) (*route53.ResourceRecordSet, error) {
+func resource_aws_r53_build_record_set(s *terraform.InstanceState) (*route53.ResourceRecordSet, error) {
 	// Parse the TTL
 	ttl, err := strconv.ParseInt(s.Attributes["ttl"], 10, 32)
 	if err != nil {
@@ -110,7 +130,7 @@ func resource_aws_r53_build_record_set(s *terraform.ResourceState) (*route53.Res
 }
 
 func resource_aws_r53_record_destroy(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	meta interface{}) error {
 	p := meta.(*ResourceProvider)
 	conn := p.route53
@@ -134,16 +154,36 @@ func resource_aws_r53_record_destroy(
 	zone := s.Attributes["zone_id"]
 	log.Printf("[DEBUG] Deleting resource records for zone: %s, name: %s",
 		zone, s.Attributes["name"])
-	_, err = conn.ChangeResourceRecordSets(zone, req)
-	if err != nil {
+	wait := resource.StateChangeConf{
+		Pending:    []string{"rejected"},
+		Target:     "accepted",
+		Timeout:    5 * time.Minute,
+		MinTimeout: 1 * time.Second,
+		Refresh: func() (interface{}, string, error) {
+			_, err := conn.ChangeResourceRecordSets(zone, req)
+			if err != nil {
+				if strings.Contains(err.Error(), "PriorRequestNotComplete") {
+					// There is some pending operation, so just retry
+					// in a bit.
+					return nil, "rejected", nil
+				}
+
+				return nil, "failure", err
+			}
+
+			return nil, "accepted", nil
+		},
+	}
+	if _, err := wait.WaitForState(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
 func resource_aws_r53_record_refresh(
-	s *terraform.ResourceState,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	conn := p.route53
 
@@ -178,7 +218,7 @@ func resource_aws_r53_record_refresh(
 }
 
 func resource_aws_r53_record_update_state(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	rec *route53.ResourceRecordSet) {
 
 	flatRec := flatmap.Flatten(map[string]interface{}{
@@ -192,9 +232,9 @@ func resource_aws_r53_record_update_state(
 }
 
 func resource_aws_r53_record_diff(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	c *terraform.ResourceConfig,
-	meta interface{}) (*terraform.ResourceDiff, error) {
+	meta interface{}) (*terraform.InstanceDiff, error) {
 	b := &diff.ResourceBuilder{
 		Attrs: map[string]diff.AttrType{
 			"zone_id": diff.AttrTypeCreate,

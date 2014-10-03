@@ -40,8 +40,28 @@ func init() {
 			}, nil
 		},
 
+		"destroy": func() (cli.Command, error) {
+			return &command.ApplyCommand{
+				Meta:       meta,
+				Destroy:    true,
+				ShutdownCh: makeShutdownCh(),
+			}, nil
+		},
+
+		"get": func() (cli.Command, error) {
+			return &command.GetCommand{
+				Meta: meta,
+			}, nil
+		},
+
 		"graph": func() (cli.Command, error) {
 			return &command.GraphCommand{
+				Meta: meta,
+			}, nil
+		},
+
+		"init": func() (cli.Command, error) {
+			return &command.InitCommand{
 				Meta: meta,
 			}, nil
 		},

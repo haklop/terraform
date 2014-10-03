@@ -15,9 +15,9 @@ import (
 )
 
 func resource_aws_db_security_group_create(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	conn := p.rdsconn
 
@@ -85,17 +85,14 @@ func resource_aws_db_security_group_create(
 }
 
 func resource_aws_db_security_group_update(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
-
-	panic("Cannot update DB")
-
-	return nil, nil
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff,
+	meta interface{}) (*terraform.InstanceState, error) {
+	panic("Cannot update DB security group")
 }
 
 func resource_aws_db_security_group_destroy(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	meta interface{}) error {
 	p := meta.(*ResourceProvider)
 	conn := p.rdsconn
@@ -119,8 +116,8 @@ func resource_aws_db_security_group_destroy(
 }
 
 func resource_aws_db_security_group_refresh(
-	s *terraform.ResourceState,
-	meta interface{}) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	meta interface{}) (*terraform.InstanceState, error) {
 	p := meta.(*ResourceProvider)
 	conn := p.rdsconn
 
@@ -134,9 +131,9 @@ func resource_aws_db_security_group_refresh(
 }
 
 func resource_aws_db_security_group_diff(
-	s *terraform.ResourceState,
+	s *terraform.InstanceState,
 	c *terraform.ResourceConfig,
-	meta interface{}) (*terraform.ResourceDiff, error) {
+	meta interface{}) (*terraform.InstanceDiff, error) {
 
 	b := &diff.ResourceBuilder{
 		Attrs: map[string]diff.AttrType{
@@ -155,8 +152,8 @@ func resource_aws_db_security_group_diff(
 }
 
 func resource_aws_db_security_group_update_state(
-	s *terraform.ResourceState,
-	v *rds.DBSecurityGroup) (*terraform.ResourceState, error) {
+	s *terraform.InstanceState,
+	v *rds.DBSecurityGroup) (*terraform.InstanceState, error) {
 
 	s.Attributes["name"] = v.Name
 	s.Attributes["description"] = v.Description

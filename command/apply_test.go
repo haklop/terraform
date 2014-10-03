@@ -1,16 +1,20 @@
 package command
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/hashicorp/terraform/config"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/mitchellh/cli"
 )
@@ -140,8 +144,9 @@ func TestApply_error(t *testing.T) {
 	var lock sync.Mutex
 	errored := false
 	p.ApplyFn = func(
-		s *terraform.ResourceState,
-		d *terraform.ResourceDiff) (*terraform.ResourceState, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		d *terraform.InstanceDiff) (*terraform.InstanceState, error) {
 		lock.Lock()
 		defer lock.Unlock()
 
@@ -150,12 +155,13 @@ func TestApply_error(t *testing.T) {
 			return nil, fmt.Errorf("error")
 		}
 
-		return &terraform.ResourceState{ID: "foo"}, nil
+		return &terraform.InstanceState{ID: "foo"}, nil
 	}
 	p.DiffFn = func(
-		*terraform.ResourceState,
-		*terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
-		return &terraform.ResourceDiff{
+		*terraform.InstanceInfo,
+		*terraform.InstanceState,
+		*terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
+		return &terraform.InstanceDiff{
 			Attributes: map[string]*terraform.ResourceAttrDiff{
 				"ami": &terraform.ResourceAttrDiff{
 					New: "bar",
@@ -189,8 +195,75 @@ func TestApply_error(t *testing.T) {
 	if state == nil {
 		t.Fatal("state should not be nil")
 	}
-	if len(state.Resources) == 0 {
+	if len(state.RootModule().Resources) == 0 {
 		t.Fatal("no resources in state")
+	}
+}
+
+func TestApply_init(t *testing.T) {
+	// Change to the temporary directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	dir := tempDir(t)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer os.Chdir(cwd)
+
+	// Create the test fixtures
+	statePath := testTempFile(t)
+	ln := testHttpServer(t)
+	defer ln.Close()
+
+	// Initialize the command
+	p := testProvider()
+	ui := new(cli.MockUi)
+	c := &ApplyCommand{
+		Meta: Meta{
+			ContextOpts: testCtxConfig(p),
+			Ui:          ui,
+		},
+	}
+
+	// Build the URL to the init
+	var u url.URL
+	u.Scheme = "http"
+	u.Host = ln.Addr().String()
+	u.Path = "/header"
+
+	args := []string{
+		"-state", statePath,
+		u.String(),
+	}
+	if code := c.Run(args); code != 0 {
+		t.Fatalf("bad: %d\n\n%s", code, ui.ErrorWriter.String())
+	}
+
+	if _, err := os.Stat("hello.tf"); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	f, err := os.Open(statePath)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer f.Close()
+
+	state, err := terraform.ReadState(f)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if state == nil {
+		t.Fatal("state should not be nil")
 	}
 }
 
@@ -242,10 +315,79 @@ func TestApply_noArgs(t *testing.T) {
 }
 
 func TestApply_plan(t *testing.T) {
+	// Disable test mode so input would be asked
+	test = false
+	defer func() { test = true }()
+
+	// Set some default reader/writers for the inputs
+	defaultInputReader = new(bytes.Buffer)
+	defaultInputWriter = new(bytes.Buffer)
+
 	planPath := testPlanFile(t, &terraform.Plan{
-		Config: new(config.Config),
+		Module: testModule(t, "apply"),
 	})
 	statePath := testTempFile(t)
+
+	p := testProvider()
+	ui := new(cli.MockUi)
+	c := &ApplyCommand{
+		Meta: Meta{
+			ContextOpts: testCtxConfig(p),
+			Ui:          ui,
+		},
+	}
+
+	args := []string{
+		"-state", statePath,
+		planPath,
+	}
+	if code := c.Run(args); code != 0 {
+		t.Fatalf("bad: %d\n\n%s", code, ui.ErrorWriter.String())
+	}
+
+	if p.InputCalled {
+		t.Fatalf("input should not be called for plans")
+	}
+
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	f, err := os.Open(statePath)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer f.Close()
+
+	state, err := terraform.ReadState(f)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if state == nil {
+		t.Fatal("state should not be nil")
+	}
+}
+
+func TestApply_planWithVarFile(t *testing.T) {
+	varFileDir := testTempDir(t)
+	varFilePath := filepath.Join(varFileDir, "terraform.tfvars")
+	if err := ioutil.WriteFile(varFilePath, []byte(applyVarFile), 0644); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	planPath := testPlanFile(t, &terraform.Plan{
+		Module: testModule(t, "apply"),
+	})
+	statePath := testTempFile(t)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	if err := os.Chdir(varFileDir); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer os.Chdir(cwd)
 
 	p := testProvider()
 	ui := new(cli.MockUi)
@@ -285,7 +427,7 @@ func TestApply_plan(t *testing.T) {
 
 func TestApply_planVars(t *testing.T) {
 	planPath := testPlanFile(t, &terraform.Plan{
-		Config: new(config.Config),
+		Module: testModule(t, "apply"),
 	})
 	statePath := testTempFile(t)
 
@@ -310,10 +452,17 @@ func TestApply_planVars(t *testing.T) {
 
 func TestApply_refresh(t *testing.T) {
 	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -371,8 +520,10 @@ func TestApply_refresh(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 
-	if !reflect.DeepEqual(backupState, originalState) {
-		t.Fatalf("bad: %#v", backupState)
+	actualStr := strings.TrimSpace(backupState.String())
+	expectedStr := strings.TrimSpace(originalState.String())
+	if actualStr != expectedStr {
+		t.Fatalf("bad:\n\n%s\n\n%s", actualStr, expectedStr)
 	}
 }
 
@@ -396,9 +547,10 @@ func TestApply_shutdown(t *testing.T) {
 	}
 
 	p.DiffFn = func(
-		*terraform.ResourceState,
-		*terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
-		return &terraform.ResourceDiff{
+		*terraform.InstanceInfo,
+		*terraform.InstanceState,
+		*terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
+		return &terraform.InstanceDiff{
 			Attributes: map[string]*terraform.ResourceAttrDiff{
 				"ami": &terraform.ResourceAttrDiff{
 					New: "bar",
@@ -407,15 +559,16 @@ func TestApply_shutdown(t *testing.T) {
 		}, nil
 	}
 	p.ApplyFn = func(
-		*terraform.ResourceState,
-		*terraform.ResourceDiff) (*terraform.ResourceState, error) {
+		*terraform.InstanceInfo,
+		*terraform.InstanceState,
+		*terraform.InstanceDiff) (*terraform.InstanceState, error) {
 		if !stopped {
 			stopped = true
 			close(stopCh)
 			<-stopReplyCh
 		}
 
-		return &terraform.ResourceState{
+		return &terraform.InstanceState{
 			ID: "foo",
 			Attributes: map[string]string{
 				"ami": "2",
@@ -461,18 +614,24 @@ func TestApply_shutdown(t *testing.T) {
 		t.Fatal("state should not be nil")
 	}
 
-	if len(state.Resources) != 1 {
-		t.Fatalf("bad: %d", len(state.Resources))
+	if len(state.RootModule().Resources) != 1 {
+		t.Fatalf("bad: %d", len(state.RootModule().Resources))
 	}
 }
 
 func TestApply_state(t *testing.T) {
 	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:       "bar",
-				Type:     "test_instance",
-				ConnInfo: make(map[string]string),
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -480,7 +639,7 @@ func TestApply_state(t *testing.T) {
 	statePath := testStateFile(t, originalState)
 
 	p := testProvider()
-	p.DiffReturn = &terraform.ResourceDiff{
+	p.DiffReturn = &terraform.InstanceDiff{
 		Attributes: map[string]*terraform.ResourceAttrDiff{
 			"ami": &terraform.ResourceAttrDiff{
 				New: "bar",
@@ -506,13 +665,16 @@ func TestApply_state(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := originalState.Resources["test_instance.foo"]
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testApplyStateDiffStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 
-	if !reflect.DeepEqual(p.ApplyState, expectedState) {
-		t.Fatalf("bad: %#v", p.ApplyState)
+	actual = strings.TrimSpace(p.ApplyState.String())
+	expected = strings.TrimSpace(testApplyStateStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 
 	// Verify a new state exists
@@ -547,10 +709,12 @@ func TestApply_state(t *testing.T) {
 	}
 
 	// nil out the ConnInfo since that should not be restored
-	originalState.Resources["test_instance.foo"].ConnInfo = nil
+	originalState.RootModule().Resources["test_instance.foo"].Primary.Ephemeral.ConnInfo = nil
 
-	if !reflect.DeepEqual(backupState, originalState) {
-		t.Fatalf("bad: %#v", backupState)
+	actualStr := strings.TrimSpace(backupState.String())
+	expectedStr := strings.TrimSpace(originalState.String())
+	if actualStr != expectedStr {
+		t.Fatalf("bad:\n\n%s\n\n%s", actualStr, expectedStr)
 	}
 }
 
@@ -587,13 +751,14 @@ func TestApply_vars(t *testing.T) {
 
 	actual := ""
 	p.DiffFn = func(
-		s *terraform.ResourceState,
-		c *terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		c *terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
 		if v, ok := c.Config["value"]; ok {
 			actual = v.(string)
 		}
 
-		return &terraform.ResourceDiff{}, nil
+		return &terraform.InstanceDiff{}, nil
 	}
 
 	args := []string{
@@ -629,13 +794,14 @@ func TestApply_varFile(t *testing.T) {
 
 	actual := ""
 	p.DiffFn = func(
-		s *terraform.ResourceState,
-		c *terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		c *terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
 		if v, ok := c.Config["value"]; ok {
 			actual = v.(string)
 		}
 
-		return &terraform.ResourceDiff{}, nil
+		return &terraform.InstanceDiff{}, nil
 	}
 
 	args := []string{
@@ -681,13 +847,14 @@ func TestApply_varFileDefault(t *testing.T) {
 
 	actual := ""
 	p.DiffFn = func(
-		s *terraform.ResourceState,
-		c *terraform.ResourceConfig) (*terraform.ResourceDiff, error) {
+		info *terraform.InstanceInfo,
+		s *terraform.InstanceState,
+		c *terraform.ResourceConfig) (*terraform.InstanceDiff, error) {
 		if v, ok := c.Config["value"]; ok {
 			actual = v.(string)
 		}
 
-		return &terraform.ResourceDiff{}, nil
+		return &terraform.InstanceDiff{}, nil
 	}
 
 	args := []string{
@@ -705,10 +872,17 @@ func TestApply_varFileDefault(t *testing.T) {
 
 func TestApply_backup(t *testing.T) {
 	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:   "bar",
-				Type: "test_instance",
+		Modules: []*terraform.ModuleState{
+			&terraform.ModuleState{
+				Path: []string{"root"},
+				Resources: map[string]*terraform.ResourceState{
+					"test_instance.foo": &terraform.ResourceState{
+						Type: "test_instance",
+						Primary: &terraform.InstanceState{
+							ID: "bar",
+						},
+					},
+				},
 			},
 		},
 	}
@@ -717,7 +891,7 @@ func TestApply_backup(t *testing.T) {
 	backupPath := testTempFile(t)
 
 	p := testProvider()
-	p.DiffReturn = &terraform.ResourceDiff{
+	p.DiffReturn = &terraform.InstanceDiff{
 		Attributes: map[string]*terraform.ResourceAttrDiff{
 			"ami": &terraform.ResourceAttrDiff{
 				New: "bar",
@@ -774,28 +948,19 @@ func TestApply_backup(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 
-	actual := backupState.Resources["test_instance.foo"]
-	expected := originalState.Resources["test_instance.foo"]
+	actual := backupState.RootModule().Resources["test_instance.foo"]
+	expected := originalState.RootModule().Resources["test_instance.foo"]
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("bad: %#v %#v", actual, expected)
 	}
 }
 
 func TestApply_disableBackup(t *testing.T) {
-	originalState := &terraform.State{
-		Resources: map[string]*terraform.ResourceState{
-			"test_instance.foo": &terraform.ResourceState{
-				ID:       "bar",
-				Type:     "test_instance",
-				ConnInfo: make(map[string]string),
-			},
-		},
-	}
-
+	originalState := testState()
 	statePath := testStateFile(t, originalState)
 
 	p := testProvider()
-	p.DiffReturn = &terraform.ResourceDiff{
+	p.DiffReturn = &terraform.InstanceDiff{
 		Attributes: map[string]*terraform.ResourceAttrDiff{
 			"ami": &terraform.ResourceAttrDiff{
 				New: "bar",
@@ -822,13 +987,16 @@ func TestApply_disableBackup(t *testing.T) {
 	}
 
 	// Verify that the provider was called with the existing state
-	expectedState := originalState.Resources["test_instance.foo"]
-	if !reflect.DeepEqual(p.DiffState, expectedState) {
-		t.Fatalf("bad: %#v", p.DiffState)
+	actual := strings.TrimSpace(p.DiffState.String())
+	expected := strings.TrimSpace(testApplyDisableBackupStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 
-	if !reflect.DeepEqual(p.ApplyState, expectedState) {
-		t.Fatalf("bad: %#v", p.ApplyState)
+	actual = strings.TrimSpace(p.ApplyState.String())
+	expected = strings.TrimSpace(testApplyDisableBackupStateStr)
+	if actual != expected {
+		t.Fatalf("bad:\n\n%s", actual)
 	}
 
 	// Verify a new state exists
@@ -857,6 +1025,47 @@ func TestApply_disableBackup(t *testing.T) {
 	}
 }
 
+func testHttpServer(t *testing.T) net.Listener {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/header", testHttpHandlerHeader)
+
+	var server http.Server
+	server.Handler = mux
+	go server.Serve(ln)
+
+	return ln
+}
+
+func testHttpHandlerHeader(w http.ResponseWriter, r *http.Request) {
+	var url url.URL
+	url.Scheme = "file"
+	url.Path = testFixturePath("init")
+
+	w.Header().Add("X-Terraform-Get", url.String())
+	w.WriteHeader(200)
+}
+
 const applyVarFile = `
 foo = "bar"
+`
+
+const testApplyDisableBackupStr = `
+ID = bar
+`
+
+const testApplyDisableBackupStateStr = `
+ID = bar
+`
+
+const testApplyStateStr = `
+ID = bar
+`
+
+const testApplyStateDiffStr = `
+ID = bar
 `

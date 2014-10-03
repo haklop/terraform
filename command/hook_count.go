@@ -38,9 +38,9 @@ func (h *CountHook) Reset() {
 }
 
 func (h *CountHook) PreApply(
-	id string,
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff) (terraform.HookAction, error) {
+	n *terraform.InstanceInfo,
+	s *terraform.InstanceState,
+	d *terraform.InstanceDiff) (terraform.HookAction, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -55,21 +55,21 @@ func (h *CountHook) PreApply(
 		action = countHookActionAdd
 	}
 
-	h.pending[id] = action
+	h.pending[n.HumanId()] = action
 
 	return terraform.HookActionContinue, nil
 }
 
 func (h *CountHook) PostApply(
-	id string,
-	s *terraform.ResourceState,
+	n *terraform.InstanceInfo,
+	s *terraform.InstanceState,
 	e error) (terraform.HookAction, error) {
 	h.Lock()
 	defer h.Unlock()
 
 	if h.pending != nil {
-		if a, ok := h.pending[id]; ok {
-			delete(h.pending, id)
+		if a, ok := h.pending[n.HumanId()]; ok {
+			delete(h.pending, n.HumanId())
 
 			if e == nil {
 				switch a {

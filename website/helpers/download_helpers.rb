@@ -18,7 +18,7 @@ if ENV["TERRAFORM_VERSION"]
     next if os == "web"
 
     $terraform_files[os] ||= []
-    $terraform_files[os] << "terraform_#{filename}"
+    $terraform_files[os] << filename
   end
 
   $terraform_os = ["darwin", "linux", "windows"] & $terraform_files.keys
@@ -33,8 +33,8 @@ end
 module DownloadHelpers
   def download_arch(file)
     parts = file.split("_")
-    return "" if parts.length != 4
-    parts[3].split(".")[0]
+    return "" if parts.length != 3
+    parts[2].split(".")[0]
   end
 
   def download_os_human(os)
@@ -54,7 +54,7 @@ module DownloadHelpers
   end
 
   def download_url(file)
-    "https://dl.bintray.com/mitchellh/terraform/#{file}"
+    "https://dl.bintray.com/mitchellh/terraform/terraform_#{file}"
   end
 
   def latest_version

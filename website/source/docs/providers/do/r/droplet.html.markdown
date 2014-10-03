@@ -34,7 +34,12 @@ The following arguments are supported:
 * `ipv6` - (Optional) Boolean controlling if IPv6 is enabled.
 * `private_networking` - (Optional) Boolean controlling if private networks are enabled.
 * `ssh_keys` - (Optional) A list of SSH IDs or fingerprints to enable in
-   the format `[12345, 123456]`
+   the format `[12345, 123456]`. To retrieve this info, use a tool such
+   as `curl` with the [DigitalOcean API](https://developers.digitalocean.com/#keys),
+   to retrieve them.
+* `user_data` (Optional) - A string of the desired User Data for the Droplet.
+   User Data is currently only available in regions with metadata
+   listed in their features.
 
 ## Attributes Reference
 

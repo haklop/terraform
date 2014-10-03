@@ -25,6 +25,8 @@ The following arguments are supported:
 
 * `ami` - (Required) The AMI to use for the instance.
 * `availability_zone` - (Optional) The AZ to start the instance in.
+* `ebs_optimized` - (Optional) If true, the launched EC2 instance will be
+     EBS-optimized.
 * `instance_type` - (Required) The type of instance to start
 * `key_name` - (Optional) The key name to use for the instance.
 * `security_groups` - (Optional) A list of security group IDs or names to associate with.
@@ -32,9 +34,13 @@ The following arguments are supported:
    for EC2, use the security group name.
 * `subnet_id` - (Optional) The VPC Subnet ID to launch in.
 * `associate_public_ip_address` - (Optional) Associate a public ip address with an instance in a VPC.
+* `private_ip` - (Optional) Private IP address to associate with the
+     instance in a VPC.
 * `source_dest_check` - (Optional) Controls if traffic is routed to the instance when
-  the destination address does not match the instance. Used for NAT or VPNs. Defaults false.
+  the destination address does not match the instance. Used for NAT or VPNs. Defaults true.
 * `user_data` - (Optional) The user data to provide when launching the instance.
+* `iam_instance_profile` - (Optional) The IAM Instance Profile to
+  launch the instance with.
 
 ## Attributes Reference
 

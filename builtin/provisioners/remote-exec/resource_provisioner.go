@@ -22,7 +22,7 @@ const (
 
 type ResourceProvisioner struct{}
 
-func (p *ResourceProvisioner) Apply(s *terraform.ResourceState,
+func (p *ResourceProvisioner) Apply(s *terraform.InstanceState,
 	c *terraform.ResourceConfig) error {
 	// Ensure the connection type is SSH
 	if err := helper.VerifySSH(s); err != nil {
@@ -195,15 +195,15 @@ func (p *ResourceProvisioner) runScripts(conf *helper.SSHConfig, scripts []io.Re
 			}
 			cmd.Wait()
 
-			rPipe1, wPipe1 := io.Pipe()
-			rPipe2, wPipe2 := io.Pipe()
-			go streamLogs(rPipe1, "stdout")
-			go streamLogs(rPipe2, "stderr")
+			stdOutReader, stdOutWriter := io.Pipe()
+			stdErrReader, stdErrWriter := io.Pipe()
+			go streamLogs(stdOutReader, "stdout")
+			go streamLogs(stdErrReader, "stderr")
 
 			cmd = &helper.RemoteCmd{
 				Command: conf.ScriptPath,
-				Stdout:  wPipe1,
-				Stderr:  wPipe2,
+				Stdout:  stdOutWriter,
+				Stderr:  stdErrWriter,
 			}
 			if err := comm.Start(cmd); err != nil {
 				return fmt.Errorf("Error starting script: %v", err)
@@ -245,12 +245,11 @@ func retryFunc(timeout time.Duration, f func() error) error {
 // of a remote command to log output for users.
 func streamLogs(r io.ReadCloser, name string) {
 	defer r.Close()
-	bufR := bufio.NewReader(r)
-	for {
-		line, err := bufR.ReadString('\n')
-		if err != nil {
-			return
-		}
-		log.Printf("remote-exec: %s: %s", name, line)
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		log.Printf("remote-exec: %s: %s", name, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return
 	}
 }

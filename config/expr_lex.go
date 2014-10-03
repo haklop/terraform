@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"unicode"
 	"unicode/utf8"
@@ -13,7 +14,9 @@ const lexEOF = 0
 // The parser uses the type <prefix>Lex as a lexer.  It must provide
 // the methods Lex(*<prefix>SymType) int and Error(string).
 type exprLex struct {
-	input string
+	Err   error
+	Input string
+
 	pos   int
 	width int
 }
@@ -102,12 +105,12 @@ func (x *exprLex) lexString(yylval *exprSymType) int {
 
 // Return the next rune for the lexer.
 func (x *exprLex) next() rune {
-	if int(x.pos) >= len(x.input) {
+	if int(x.pos) >= len(x.Input) {
 		x.width = 0
 		return lexEOF
 	}
 
-	r, w := utf8.DecodeRuneInString(x.input[x.pos:])
+	r, w := utf8.DecodeRuneInString(x.Input[x.pos:])
 	x.width = w
 	x.pos += x.width
 	return r
@@ -127,5 +130,5 @@ func (x *exprLex) backup() {
 
 // The parser calls this method on a parse error.
 func (x *exprLex) Error(s string) {
-	log.Printf("parse error: %s", s)
+	x.Err = fmt.Errorf("parse error: %s", s)
 }

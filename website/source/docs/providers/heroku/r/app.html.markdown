@@ -26,14 +26,16 @@ resource "heroku_app" "default" {
 
 The following arguments are supported:
 
-* `name` - (Optional) The name of the application. In Heroku, this is also the
-   unique ID.
-* `region` - (Optional) The region that the app should be deployed in.
+* `name` - (Required) The name of the application. In Heroku, this is also the
+   unique ID, so it must be unique and have a minimum of 3 characters.
+* `region` - (Required) The region that the app should be deployed in.
 * `stack` - (Optional) The application stack is what platform to run the application
    in.
 * `config_vars` - (Optional) Configuration variables for the application.
-   This is a map that can set keys against the application.
-
+     The config variables in this map are not the final set of configuration
+     variables, but rather variables you want present. That is, other
+     configuration variables set externally won't be removed by Terraform
+     if they aren't present in this list.
 
 ## Attributes Reference
 
@@ -51,4 +53,6 @@ The following attributes are exported:
    at by default.
 * `heroku_hostname` - A hostname for the Heroku application, suitable
    for pointing DNS records.
-
+* `all_config_vars` - A map of all of the configuration variables that
+    exist for the app, containing both those set by Terraform and those
+    set externally.
