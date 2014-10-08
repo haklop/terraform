@@ -1,6 +1,7 @@
 package openstack
 
 import (
+	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/rackspace/gophercloud"
 	"log"
 	"os"
@@ -14,16 +15,13 @@ type Config struct {
 	ApiKey     string `mapstructure:"api_key"`
 	TenantId   string `mapstructure:"tenant_id"`
 	TenantName string `mapstructure:"tenant_name"`
-}
 
-type OpenstackClient struct {
-	Config         *Config
 	AccessProvider gophercloud.AccessProvider
 }
 
 // Client() returns a new client for accessing openstack.
 //
-func (c *Config) Client() (*OpenstackClient, error) {
+func (c *Config) NewClient() error {
 
 	if v := os.Getenv("OS_AUTH_URL"); v != "" {
 		c.Auth = v
@@ -59,13 +57,30 @@ func (c *Config) Client() (*OpenstackClient, error) {
 		},
 	)
 
+	c.AccessProvider = accessProvider
+
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	client := &OpenstackClient{c, accessProvider}
+	log.Printf("[INFO] Openstack Client configured for user %s", c.User)
 
-	log.Printf("[INFO] Openstack Client configured for user %s", client.Config.User)
+	return nil
+}
 
-	return client, nil
+func (p *Config) getServersApi() (gophercloud.CloudServersProvider, error) {
+	return gophercloud.ServersApi(p.AccessProvider, gophercloud.ApiCriteria{
+		Name:      "nova",
+		UrlChoice: gophercloud.PublicURL,
+	})
+}
+
+func (p *Config) getNetworkApi() (network.NetworkProvider, error) {
+
+	access := p.AccessProvider.(*gophercloud.Access)
+
+	return network.NetworksApi(access, gophercloud.ApiCriteria{
+		Name:      "neutron",
+		UrlChoice: gophercloud.PublicURL,
+	})
 }

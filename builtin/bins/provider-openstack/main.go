@@ -6,5 +6,7 @@ import (
 )
 
 func main() {
-	plugin.Serve(new(openstack.ResourceProvider))
+	plugin.Serve(&plugin.ServeOpts{
+		ProviderFunc: openstack.Provider,
+	})
 }
