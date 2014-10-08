@@ -2,137 +2,121 @@ package openstack
 
 import (
 	"github.com/haklop/gophercloud-extensions/network"
-	"github.com/hashicorp/terraform/helper/diff"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud"
 	"log"
 )
 
-func resource_openstack_network_create(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
+func resourceNetwork() *schema.Resource {
+	return &schema.Resource{
+		Create: resourceNetworkCreate,
+		Read:   resourceNetworkRead,
+		Update: resourceNetworkUpdate,
+		Delete: resourceNetworkDelete,
 
-	p := meta.(*ResourceProvider)
-	networksApi, err := p.getNetworkApi()
-	if err != nil {
-		return nil, err
+		Schema: map[string]*schema.Schema{
+			"name": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+			},
+		},
 	}
-
-	// Merge the diff into the state so that we have all the attributes
-	// properly.
-	rs := s.MergeDiff(d)
-
-	access := p.client.AccessProvider.(*gophercloud.Access)
-
-	newNetwork, err := networksApi.CreateNetwork(network.NewNetwork{
-		Name:         rs.Attributes["name"],
-		AdminStateUp: true,
-		TenantId:     access.Token.Tenant.Id,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	rs.ID = newNetwork.Id
-	rs.Attributes["id"] = newNetwork.Id
-
-	return rs, err
 }
 
-func resource_openstack_network_destroy(
-	s *terraform.ResourceState,
-	meta interface{}) error {
+func resourceNetworkCreate(d *schema.ResourceData, meta interface{}) error {
 
-	log.Printf("[DEBUG] Destroy network: %s", s.ID)
-
-	p := meta.(*ResourceProvider)
+	p := meta.(*Config)
 	networksApi, err := p.getNetworkApi()
 	if err != nil {
 		return err
 	}
 
-	err = networksApi.DeleteNetwork(s.ID)
+	access := p.AccessProvider.(*gophercloud.Access)
 
-	return err
-}
-
-func resource_openstack_network_refresh(
-	s *terraform.ResourceState,
-	meta interface{}) (*terraform.ResourceState, error) {
-
-	log.Printf("[DEBUG] Retrieve information about network: %s", s.ID)
-
-	p := meta.(*ResourceProvider)
-	networksApi, err := p.getNetworkApi()
-	if err != nil {
-		return nil, err
+	networkConfiguration := network.NewNetwork{
+		Name:         d.Get("name").(string),
+		AdminStateUp: true,
+		TenantId:     access.Token.Tenant.Id,
 	}
 
-	n, err := networksApi.GetNetwork(s.ID)
+	log.Printf("[DEBUG] Create network: %#v", networkConfiguration)
+
+	newNetwork, err := networksApi.CreateNetwork(networkConfiguration)
+	if err != nil {
+		return err
+	}
+
+	d.SetId(newNetwork.Id)
+
+	return nil
+}
+
+func resourceNetworkDelete(d *schema.ResourceData, meta interface{}) error {
+
+	log.Printf("[DEBUG] Destroy network: %s", d.Id())
+
+	p := meta.(*Config)
+	networksApi, err := p.getNetworkApi()
+	if err != nil {
+		return err
+	}
+
+	return networksApi.DeleteNetwork(d.Id())
+}
+
+func resourceNetworkRead(d *schema.ResourceData, meta interface{}) error {
+
+	log.Printf("[DEBUG] Retrieve information about network: %s", d.Id())
+
+	p := meta.(*Config)
+	networksApi, err := p.getNetworkApi()
+	if err != nil {
+		return err
+	}
+
+	n, err := networksApi.GetNetwork(d.Id())
 	if err != nil {
 		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
 		if !ok {
-			return nil, err
+			return err
 		}
 
 		if httpError.Actual == 404 {
-			return nil, nil
+			d.SetId("")
+			return nil
 		}
 
-		return nil, err
+		return err
 	}
 
-	s.Attributes["name"] = n.Name
-
-	return s, nil
+	d.Set("name", n.Name)
+	return nil
 }
 
-func resource_openstack_network_diff(
-	s *terraform.ResourceState,
-	c *terraform.ResourceConfig,
-	meta interface{}) (*terraform.ResourceDiff, error) {
+func resourceNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
 
-	b := &diff.ResourceBuilder{
-		Attrs: map[string]diff.AttrType{
-			"name": diff.AttrTypeUpdate,
-		},
-
-		ComputedAttrs: []string{
-			"id",
-		},
-	}
-
-	return b.Diff(s, c)
-}
-
-func resource_openstack_network_update(
-	s *terraform.ResourceState,
-	d *terraform.ResourceDiff,
-	meta interface{}) (*terraform.ResourceState, error) {
-
-	p := meta.(*ResourceProvider)
+	p := meta.(*Config)
 	networksApi, err := p.getNetworkApi()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Merge the diff into the state so that we have all the attributes
-	// properly.
-	rs := s.MergeDiff(d)
+	d.Partial(true)
 
-	if attr, ok := d.Attributes["name"]; ok {
-		_, err := networksApi.UpdateNetwork(rs.ID, network.UpdatedNetwork{
-			Name: attr.New,
+	if d.HasChange("name") {
+		_, err := networksApi.UpdateNetwork(d.Id(), network.UpdatedNetwork{
+			Name: d.Get("name").(string),
 		})
 
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		rs.Attributes["name"] = attr.New
+		d.SetPartial("name")
 	}
 
-	return rs, nil
+	d.Partial(false)
+
+	return nil
 }
