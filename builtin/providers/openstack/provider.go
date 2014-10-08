@@ -32,6 +32,7 @@ func Provider() terraform.ResourceProvider {
 		ResourcesMap: map[string]*schema.Resource{
 			"openstack_network": resourceNetwork(),
 			"openstack_subnet": resourceSubnet(),
+			"openstack_router": resourceRouter(),
 		},
 
 		ConfigureFunc: providerConfigure,
