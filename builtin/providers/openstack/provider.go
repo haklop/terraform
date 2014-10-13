@@ -35,6 +35,7 @@ func Provider() terraform.ResourceProvider {
 			"openstack_router": resourceRouter(),
 			"openstack_security_group": resourceSecurityGroup(),
 			"openstack_compute": resourceCompute(),
+			"openstack_lbaas": resourceLBaaS(),
 		},
 
 		ConfigureFunc: providerConfigure,

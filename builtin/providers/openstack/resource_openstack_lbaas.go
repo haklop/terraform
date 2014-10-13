@@ -5,6 +5,7 @@ import (
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
 	"fmt"
+	"log"
 )
 
 func resourceLBaaS() *schema.Resource {
@@ -39,7 +40,7 @@ func resourceLBaaS() *schema.Resource {
 			},
 			"member": &schema.Schema{
 				Type:     schema.TypeList,
-				Required: true,
+				Optional: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"port": &schema.Schema{
@@ -51,6 +52,42 @@ func resourceLBaaS() *schema.Resource {
 							Required: true,
 						},
 						"member_id": &schema.Schema{
+							Type:     schema.TypeString,
+							Computed: true,
+						},
+					},
+				},
+			},
+			"monitor": &schema.Schema{
+				Type:     schema.TypeList,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"type": &schema.Schema{
+							Type:     schema.TypeString,
+							Required: true,
+						},
+						"delay": &schema.Schema{
+							Type:     schema.TypeInt,
+							Required: true,
+						},
+						"timeout": &schema.Schema{
+							Type:     schema.TypeInt,
+							Required: true,
+						},
+						"max_retries": &schema.Schema{
+							Type:     schema.TypeInt,
+							Required: true,
+						},
+						"expected_codes": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"http_method": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"monitor_id": &schema.Schema{
 							Type:     schema.TypeString,
 							Computed: true,
 						},
@@ -130,6 +167,33 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 		// TODO save memberId
 	}
 
+	monitorsCount := d.Get("monitor.#").(int)
+	for i := 0; i < monitorsCount; i++ {
+		prefix := fmt.Sprintf("monitor.%d", i)
+
+		var monitor network.NewMonitor
+		monitor.Type = d.Get(prefix + ".type").(string)
+		monitor.Delay = d.Get(prefix + ".delay").(int)
+		monitor.Timeout = d.Get(prefix + ".timeout").(int)
+		monitor.MaxRetries = d.Get(prefix + ".max_retries").(int)
+		monitor.ExpectedCodes = d.Get(prefix + ".expected_codes").(string)
+		monitor.HttpMethod = d.Get(prefix + ".http_method").(string)
+
+		result, err := networksApi.CreateMonitor(monitor)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("monitor: %#v", result)
+
+		err = networksApi.AssociateMonitor(result.Id, d.Id())
+		if err != nil {
+			return err
+		}
+		// TODO save monitor id
+
+	}
+
 	return err
 
 }
@@ -148,6 +212,14 @@ func resourceLBaaSDelete(d *schema.ResourceData, meta interface{}) error {
 
 	for _, member := range pool.Members {
 		err = networksApi.DeleteMember(member)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, monitor := range pool.HealthMonitors {
+
+		err = networksApi.DeleteMonitor(monitor)
 		if err != nil {
 			return err
 		}
@@ -183,7 +255,7 @@ func resourceLBaaSRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("description", pool.Description)
 	d.Set("lb_method", pool.LoadMethod)
 
-	// TODO compare pool.Members
+	// TODO compare pool.Members and pool.HealthMonitors
 
 	return nil
 
@@ -214,7 +286,7 @@ func resourceLBaaSUpdate(d *schema.ResourceData, meta interface{}) error {
 
 	_, err = networksApi.UpdatePool(updatedPool)
 
-	// TODO update members
+	// TODO update members and HealthMonitors
 
 	return err
 
