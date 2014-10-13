@@ -24,6 +24,10 @@ func resourceLBaaS() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 			},
+			"provider": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+			},
 			"subnet_id": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
@@ -112,6 +116,7 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 		LoadMethod:  d.Get("lb_method").(string),
 		Protocol:    d.Get("protocol").(string),
 		Description: d.Get("description").(string),
+		Provider: d.Get("provider").(string),
 	})
 
 	if err != nil {
@@ -218,6 +223,11 @@ func resourceLBaaSDelete(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	for _, monitor := range pool.HealthMonitors {
+
+		err = networksApi.UnassociateMonitor(monitor, d.Id())
+		if err != nil {
+			return err
+		}
 
 		err = networksApi.DeleteMonitor(monitor)
 		if err != nil {
