@@ -3,6 +3,7 @@ package openstack
 import (
 	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/rackspace/gophercloud"
 	"github.com/racker/perigee"
 	"fmt"
 	"log"
@@ -41,6 +42,18 @@ func resourceLBaaS() *schema.Resource {
 			"lb_method": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
+			},
+			"vip_protocol_port": &schema.Schema{
+				Type:     schema.TypeInt,
+				Optional: true,
+			},
+			"floating_ip_pool_id": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"floating_ip": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 			"member": &schema.Schema{
 				Type:     schema.TypeList,
@@ -199,7 +212,66 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 
 	}
 
-	return err
+	vipProtocolPort, ok := d.GetOk("vip_protocol_port")
+	if (!ok) {
+		return nil
+	}
+
+	vip, err := networksApi.CreateVip(network.NewVip{
+		Name: d.Get("name").(string) + "_vip",
+		Protocol: d.Get("protocol").(string),
+		SubnetId: d.Get("subnet_id").(string),
+		ProtocolPort: vipProtocolPort.(int),
+		PoolId: d.Id(),
+	})
+
+	// TODO floating ip
+	floatingIpPoolId, ok := d.GetOk("floating_ip_pool_id")
+	if (!ok) {
+		return nil
+	}
+
+	serversApi, err := p.getServersApi()
+	if err != nil {
+		return err
+	}
+
+	floaingIps, err := serversApi.ListFloatingIps()
+	if err != nil {
+		return err
+	}
+
+	var newIp gophercloud.FloatingIp
+	hasFloatingIps := false
+
+	for _, element := range floaingIps {
+		// use first floating ip available on the pool
+		if element.Pool == floatingIpPoolId.(string) && element.InstanceId == "" {
+			newIp = element
+			hasFloatingIps = true
+		}
+	}
+
+	// if there is no available floating ips, try to create a new one
+	if !hasFloatingIps {
+		newIp, err = serversApi.CreateFloatingIp(floatingIpPoolId.(string))
+		if err != nil {
+			return err
+		}
+	}
+
+	err = serversApi.AssociateFloatingIp(vip.Id, newIp)
+	if err != nil {
+		return err
+	}
+
+	d.Set("floating_ip", newIp.Ip)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 
 }
 
@@ -230,6 +302,13 @@ func resourceLBaaSDelete(d *schema.ResourceData, meta interface{}) error {
 		}
 
 		err = networksApi.DeleteMonitor(monitor)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(pool.VipId) > 0 {
+		err = networksApi.DeleteVip(pool.VipId)
 		if err != nil {
 			return err
 		}
