@@ -1,95 +1,96 @@
 package openstack
 
 import (
-  "github.com/hashicorp/terraform/helper/schema"
-  "github.com/racker/perigee"
-  "github.com/rackspace/gophercloud"
-  "github.com/hashicorp/terraform/helper/hashcode"
+	"time"
+
+	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/resource"
-  "time"
+	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/racker/perigee"
+	"github.com/rackspace/gophercloud"
 )
 
 func resourceCompute() *schema.Resource {
-  return &schema.Resource{
-    Create: resourceComputeCreate,
-    Read:   resourceComputeRead,
-    Update:   resourceComputeUpdate,
-    Delete: resourceComputeDelete,
+	return &schema.Resource{
+		Create: resourceComputeCreate,
+		Read:   resourceComputeRead,
+		Update: resourceComputeUpdate,
+		Delete: resourceComputeDelete,
 
-    Schema: map[string]*schema.Schema{
-      "image_ref": &schema.Schema{
-        Type:     schema.TypeString,
-        Required: true,
-        ForceNew: true,
-      },
+		Schema: map[string]*schema.Schema{
+			"image_ref": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+				ForceNew: true,
+			},
 
-      "key_pair_name": &schema.Schema{
-        Type:     schema.TypeString,
-        Required: true,
-        ForceNew: true, // TODO handle update
-      },
+			"key_pair_name": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+				ForceNew: true, // TODO handle update
+			},
 
-      "flavor_ref": &schema.Schema{
-        Type:     schema.TypeString,
-        Required: true,
-      },
+			"flavor_ref": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+			},
 
-      "name": &schema.Schema{
-        Type:     schema.TypeString,
-        Required: true,
-      },
+			"name": &schema.Schema{
+				Type:     schema.TypeString,
+				Required: true,
+			},
 
-      "networks": &schema.Schema{
-        Type:     schema.TypeSet,
-        Optional: true,
-        ForceNew: true, // TODO handle update
-        Elem:     &schema.Schema{Type: schema.TypeString},
-        Set: func(v interface{}) int {
-          return hashcode.String(v.(string))
-        },
-      },
+			"networks": &schema.Schema{
+				Type:     schema.TypeSet,
+				Optional: true,
+				ForceNew: true, // TODO handle update
+				Elem:     &schema.Schema{Type: schema.TypeString},
+				Set: func(v interface{}) int {
+					return hashcode.String(v.(string))
+				},
+			},
 
-      "security_groups": &schema.Schema{
-        Type:     schema.TypeSet,
-        Optional: true,
-        ForceNew: true, // TODO handle update
-        Elem:     &schema.Schema{Type: schema.TypeString},
-        Set: func(v interface{}) int {
-          return hashcode.String(v.(string))
-        },
-      },
+			"security_groups": &schema.Schema{
+				Type:     schema.TypeSet,
+				Optional: true,
+				ForceNew: true, // TODO handle update
+				Elem:     &schema.Schema{Type: schema.TypeString},
+				Set: func(v interface{}) int {
+					return hashcode.String(v.(string))
+				},
+			},
 
-      "floating_ip_pool": &schema.Schema{
-        Type:     schema.TypeString,
-        Optional: true,
-      },
+			"floating_ip_pool": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+			},
 
-      "floating_ip": &schema.Schema{
-        Type:     schema.TypeString,
-        Computed: true,
-      },
-    },
-  }
+			"floating_ip": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
+			},
+		},
+	}
 }
 
 func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
-  p := meta.(*Config)
-  serversApi, err := p.getServersApi()
-  if err != nil {
-    return err
-  }
+	p := meta.(*Config)
+	serversApi, err := p.getServersApi()
+	if err != nil {
+		return err
+	}
 
-  v := d.Get("networks").(*schema.Set)
-  networks := make([]gophercloud.NetworkConfig, v.Len())
-  for i, v := range v.List() {
-    networks[i] = gophercloud.NetworkConfig{v.(string)}
-  }
+	v := d.Get("networks").(*schema.Set)
+	networks := make([]gophercloud.NetworkConfig, v.Len())
+	for i, v := range v.List() {
+		networks[i] = gophercloud.NetworkConfig{v.(string)}
+	}
 
 	v = d.Get("security_groups").(*schema.Set)
-  securityGroup := make([]map[string]interface{}, v.Len())
-  for i, v := range v.List() {
-    securityGroup[i] = map[string]interface{}{"name": v.(string)}
-  }
+	securityGroup := make([]map[string]interface{}, v.Len())
+	for i, v := range v.List() {
+		securityGroup[i] = map[string]interface{}{"name": v.(string)}
+	}
 
 	newServer, err := serversApi.CreateServer(gophercloud.NewServer{
 		Name:          d.Get("name").(string),
@@ -121,7 +122,7 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-  pool := d.Get("floating_ip_pool").(string)
+	pool := d.Get("floating_ip_pool").(string)
 	if len(pool) > 0 {
 		var newIp gophercloud.FloatingIp
 		hasFloatingIps := false
@@ -155,23 +156,23 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		d.Set("floating_ip", newIp.Ip)
 
 		// Initialize the connection info
-    d.SetConnInfo(map[string]string{
-      "type": "ssh",
-      "host": newIp.Ip,
-    })
+		d.SetConnInfo(map[string]string{
+			"type": "ssh",
+			"host": newIp.Ip,
+		})
 	}
 
-  return nil
+	return nil
 }
 
 func resourceComputeDelete(d *schema.ResourceData, meta interface{}) error {
-  p := meta.(*Config)
-  serversApi, err := p.getServersApi()
-  if err != nil {
-    return err
-  }
+	p := meta.(*Config)
+	serversApi, err := p.getServersApi()
+	if err != nil {
+		return err
+	}
 
-  err = serversApi.DeleteServerById(d.Id())
+	err = serversApi.DeleteServerById(d.Id())
 	if err != nil {
 		return err
 	}
@@ -191,66 +192,66 @@ func resourceComputeDelete(d *schema.ResourceData, meta interface{}) error {
 }
 
 func resourceComputeUpdate(d *schema.ResourceData, meta interface{}) error {
-  p := meta.(*Config)
-  serversApi, err := p.getServersApi()
-  if err != nil {
-    return err
-  }
+	p := meta.(*Config)
+	serversApi, err := p.getServersApi()
+	if err != nil {
+		return err
+	}
 
-  d.Partial(true)
+	d.Partial(true)
 
-  if d.HasChange("name") {
-    _, err := serversApi.UpdateServer(d.Id(), gophercloud.NewServerSettings{
-      Name: d.Get("name").(string),
-    })
+	if d.HasChange("name") {
+		_, err := serversApi.UpdateServer(d.Id(), gophercloud.NewServerSettings{
+			Name: d.Get("name").(string),
+		})
 
-    if err != nil {
-      return err
-    }
+		if err != nil {
+			return err
+		}
 
-    d.SetPartial("name")
-  }
+		d.SetPartial("name")
+	}
 
-  if d.HasChange("flavor_ref") {
-    err := serversApi.ResizeServer(d.Id(), d.Get("name").(string), d.Get("flavor_ref").(string), "")
+	if d.HasChange("flavor_ref") {
+		err := serversApi.ResizeServer(d.Id(), d.Get("name").(string), d.Get("flavor_ref").(string), "")
 
-    if err != nil {
-      return err
-    }
+		if err != nil {
+			return err
+		}
 
-    stateConf := &resource.StateChangeConf{
-      Pending:    []string{"ACTIVE", "RESIZE"},
-      Target:     "VERIFY_RESIZE",
-      Refresh:    WaitForServerState(serversApi, d.Id()),
-      Timeout:    30 * time.Minute,
-      Delay:      10 * time.Second,
-      MinTimeout: 3 * time.Second,
-    }
+		stateConf := &resource.StateChangeConf{
+			Pending:    []string{"ACTIVE", "RESIZE"},
+			Target:     "VERIFY_RESIZE",
+			Refresh:    WaitForServerState(serversApi, d.Id()),
+			Timeout:    30 * time.Minute,
+			Delay:      10 * time.Second,
+			MinTimeout: 3 * time.Second,
+		}
 
-    _, err = stateConf.WaitForState()
+		_, err = stateConf.WaitForState()
 
-    if err != nil {
-      return err
-    }
+		if err != nil {
+			return err
+		}
 
-    err = serversApi.ConfirmResize(d.Id())
+		err = serversApi.ConfirmResize(d.Id())
 
-    d.SetPartial("flavor_ref")
-  }
+		d.SetPartial("flavor_ref")
+	}
 
-  d.Partial(false)
+	d.Partial(false)
 
 	return nil
 }
 
 func resourceComputeRead(d *schema.ResourceData, meta interface{}) error {
-  p := meta.(*Config)
-  serversApi, err := p.getServersApi()
-  if err != nil {
-    return err
-  }
+	p := meta.(*Config)
+	serversApi, err := p.getServersApi()
+	if err != nil {
+		return err
+	}
 
-  server, err := serversApi.ServerById(d.Id())
+	server, err := serversApi.ServerById(d.Id())
 	if err != nil {
 		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
 		if !ok {
@@ -258,7 +259,7 @@ func resourceComputeRead(d *schema.ResourceData, meta interface{}) error {
 		}
 
 		if httpError.Actual == 404 {
-      d.SetId("")
+			d.SetId("")
 			return nil
 		}
 

@@ -1,11 +1,12 @@
 package openstack
 
 import (
+	"fmt"
+	"log"
+
 	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"fmt"
-	"log"
 )
 
 func resourceLBaaS() *schema.Resource {
@@ -128,7 +129,7 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 		LoadMethod:  d.Get("lb_method").(string),
 		Protocol:    d.Get("protocol").(string),
 		Description: d.Get("description").(string),
-		Provider: d.Get("provider").(string),
+		Provider:    d.Get("provider").(string),
 	})
 
 	if err != nil {
@@ -212,16 +213,16 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	vipProtocolPort, ok := d.GetOk("vip_protocol_port")
-	if (!ok) {
+	if !ok {
 		return nil
 	}
 
 	vip, err := networksApi.CreateVip(network.NewVip{
-		Name: d.Get("name").(string) + "_vip",
-		Protocol: d.Get("protocol").(string),
-		SubnetId: d.Get("subnet_id").(string),
+		Name:         d.Get("name").(string) + "_vip",
+		Protocol:     d.Get("protocol").(string),
+		SubnetId:     d.Get("subnet_id").(string),
 		ProtocolPort: vipProtocolPort.(int),
-		PoolId: d.Id(),
+		PoolId:       d.Id(),
 	})
 
 	if err != nil {
@@ -230,7 +231,7 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 
 	// TODO retrieve pool_id corresponding to the pool name
 	_, ok = d.GetOk("floating_ip_pool_id")
-	if (!ok) {
+	if !ok {
 		return nil
 	}
 

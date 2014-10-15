@@ -30,12 +30,12 @@ func Provider() terraform.ResourceProvider {
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
-			"openstack_network": resourceNetwork(),
-			"openstack_subnet": resourceSubnet(),
-			"openstack_router": resourceRouter(),
+			"openstack_network":        resourceNetwork(),
+			"openstack_subnet":         resourceSubnet(),
+			"openstack_router":         resourceRouter(),
 			"openstack_security_group": resourceSecurityGroup(),
-			"openstack_compute": resourceCompute(),
-			"openstack_lbaas": resourceLBaaS(),
+			"openstack_compute":        resourceCompute(),
+			"openstack_lbaas":          resourceLBaaS(),
 		},
 
 		ConfigureFunc: providerConfigure,
@@ -44,10 +44,10 @@ func Provider() terraform.ResourceProvider {
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	config := Config{
-		Auth:       d.Get("auth_url").(string),
-		User:       d.Get("username").(string),
-		Password:   d.Get("password").(string),
-		TenantId:   d.Get("tenant_id").(string),
+		Auth:     d.Get("auth_url").(string),
+		User:     d.Get("username").(string),
+		Password: d.Get("password").(string),
+		TenantId: d.Get("tenant_id").(string),
 	}
 
 	if err := config.NewClient(); err != nil {
