@@ -3,7 +3,6 @@ package openstack
 import (
 	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/rackspace/gophercloud"
 	"github.com/racker/perigee"
 	"fmt"
 	"log"
@@ -225,50 +224,58 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 		PoolId: d.Id(),
 	})
 
-	// TODO floating ip
-	floatingIpPoolId, ok := d.GetOk("floating_ip_pool_id")
+	if err != nil {
+		return err
+	}
+
+	// TODO retrieve pool_id corresponding to the pool name
+	_, ok = d.GetOk("floating_ip_pool_id")
 	if (!ok) {
 		return nil
 	}
 
-	serversApi, err := p.getServersApi()
+	floatingIps, err := networksApi.ListFloatingIps()
 	if err != nil {
 		return err
 	}
 
-	floaingIps, err := serversApi.ListFloatingIps()
-	if err != nil {
-		return err
-	}
-
-	var newIp gophercloud.FloatingIp
+	var newIp network.FloatingIp
 	hasFloatingIps := false
 
-	for _, element := range floaingIps {
+	for _, element := range floatingIps {
+		// TODO check the pool id
 		// use first floating ip available on the pool
-		if element.Pool == floatingIpPoolId.(string) && element.InstanceId == "" {
+		log.Printf("ips: %#v", element)
+		if len(element.PortId) == 0 {
 			newIp = element
 			hasFloatingIps = true
 		}
 	}
 
 	// if there is no available floating ips, try to create a new one
-	if !hasFloatingIps {
+	// FIXME create floatingIp with neutron
+	/*if !hasFloatingIps {
 		newIp, err = serversApi.CreateFloatingIp(floatingIpPoolId.(string))
 		if err != nil {
 			return err
 		}
 	}
+	*/
 
-	err = serversApi.AssociateFloatingIp(vip.Id, newIp)
-	if err != nil {
-		return err
-	}
+	if hasFloatingIps {
+		log.Printf("associate %#v with  %#v", vip, newIp)
+		err = networksApi.AssociateFloatingIp(vip.PortId, newIp.Id)
+		if err != nil {
+			return err
+		}
 
-	d.Set("floating_ip", newIp.Ip)
+		d.Set("floating_ip", newIp.FloatingIpAddress)
 
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("Unable to associate a floating ip")
 	}
 
 	return nil
