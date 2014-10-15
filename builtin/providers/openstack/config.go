@@ -1,11 +1,12 @@
 package openstack
 
 import (
-	"github.com/haklop/gophercloud-extensions/network"
-	"github.com/rackspace/gophercloud"
 	"log"
 	"os"
 	"strings"
+
+	"github.com/haklop/gophercloud-extensions/network"
+	"github.com/rackspace/gophercloud"
 )
 
 type Config struct {

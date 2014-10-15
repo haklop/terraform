@@ -1,11 +1,12 @@
 package openstack
 
 import (
+	"log"
+
 	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud"
-	"log"
 )
 
 func resourceNetwork() *schema.Resource {
