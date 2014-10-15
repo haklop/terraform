@@ -1,6 +1,8 @@
 package openstack
 
 import (
+	"os"
+
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 )
@@ -9,23 +11,27 @@ func Provider() terraform.ResourceProvider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
 			"auth_url": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				DefaultFunc: envDefaultFunc("OS_AUTH_URL"),
+				Required:    true,
 			},
 
 			"username": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				DefaultFunc: envDefaultFunc("OS_USERNAME"),
+				Required:    true,
 			},
 
 			"password": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				DefaultFunc: envDefaultFunc("OS_PASSWORD"),
+				Required:    true,
 			},
 
 			"tenant_id": &schema.Schema{
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				DefaultFunc: envDefaultFunc("OS_TENANT_ID"),
+				Required:    true,
 			},
 		},
 
@@ -39,6 +45,16 @@ func Provider() terraform.ResourceProvider {
 		},
 
 		ConfigureFunc: providerConfigure,
+	}
+}
+
+func envDefaultFunc(k string) schema.SchemaDefaultFunc {
+	return func() (interface{}, error) {
+		if v := os.Getenv(k); v != "" {
+			return v, nil
+		}
+
+		return nil, nil
 	}
 }
 
