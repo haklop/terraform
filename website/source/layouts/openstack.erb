@@ -1,0 +1,46 @@
+<% wrap_layout :inner do %>
+	<% content_for :sidebar do %>
+	<div class="docs-sidebar hidden-print affix-top" role="complementary">
+	<ul class="nav docs-sidenav">
+		<li<%= sidebar_current("docs-home") %>>
+		<a href="/docs/index.html">&laquo; Documentation Home</a>
+		</li>
+
+		<li<%= sidebar_current("docs-openstack-index") %>>
+		<a href="/docs/providers/openstack/index.html">OpenStack Provider</a>
+		</li>
+
+		<li<%= sidebar_current("docs-openstack-resource") %>>
+		<a href="#">Resources</a>
+		<ul class="nav nav-visible">
+			<li<%= sidebar_current("docs-openstack-resource-compute") %>>
+			<a href="/docs/providers/openstack/r/compute.html">openstack_compute</a>
+			</li>
+
+			<li<%= sidebar_current("docs-openstack-resource-lbaas") %>>
+			<a href="/docs/providers/openstack/r/lbaas.html">openstack_lbaas</a>
+			</li>
+
+			<li<%= sidebar_current("docs-openstack-resource-network") %>>
+			<a href="/docs/providers/openstack/r/network.html">openstack_network</a>
+			</li>
+
+			<li<%= sidebar_current("docs-openstack-resource-router") %>>
+			<a href="/docs/providers/openstack/r/router.html">openstack_router</a>
+			</li>
+
+			<li<%= sidebar_current("docs-openstack-resource-security_group") %>>
+			<a href="/docs/providers/openstack/r/security_group.html">openstack_security_group</a>
+			</li>
+
+			<li<%= sidebar_current("docs-openstack-resource-subnet") %>>
+			<a href="/docs/providers/openstack/r/subnet.html">openstack_subnet</a>
+			</li>
+		</ul>
+		</li>
+	</ul>
+</div>
+	<% end %>
+
+<%= yield %>
+	<% end %>
