@@ -26,7 +26,7 @@ func resourceCompute() *schema.Resource {
 
 			"key_pair_name": &schema.Schema{
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
 				ForceNew: true, // TODO handle update
 			},
 
