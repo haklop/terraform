@@ -7,6 +7,7 @@ import (
 	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
+	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud"
 )
 
@@ -48,6 +49,15 @@ func testAccCheckOpenstackNetworkDestroy(s *terraform.State) error {
 		_, err = networksApi.GetNetwork(rs.Primary.ID)
 		if err == nil {
 			return fmt.Errorf("Network (%s) still exists.", rs.Primary.ID)
+		}
+
+		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+		if !ok {
+			return fmt.Errorf("Unkonw Security Group error")
+		}
+
+		if httpError.Actual != 404 {
+			return httpError
 		}
 	}
 
