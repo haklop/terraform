@@ -44,4 +44,12 @@ func testAccPreCheck(t *testing.T) {
 	if v := os.Getenv("OS_TENANT_ID"); v == "" {
 		t.Fatal("OS_TENANT_ID must be set for acceptance tests.")
 	}
+
+	if v := os.Getenv("OS_AT_DEFAULT_IMAGE_REF"); v == "" {
+		t.Fatal("OS_AT_DEFAULT_IMAGE_REF must be set for acceptance tests.")
+	}
+
+	if v := os.Getenv("OS_AT_DEFAULT_FLAVOR_REF"); v == "" {
+		t.Fatal("OS_AT_DEFAULT_IMAGE_REF must be set for acceptance tests.")
+	}
 }
