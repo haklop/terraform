@@ -36,13 +36,14 @@ func Provider() terraform.ResourceProvider {
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
-			"openstack_network":        resourceNetwork(),
-			"openstack_subnet":         resourceSubnet(),
-			"openstack_router":         resourceRouter(),
-			"openstack_security_group": resourceSecurityGroup(),
-			"openstack_compute":        resourceCompute(),
-			"openstack_lbaas":          resourceLBaaS(),
-			"openstack_firewall":       resourceFirewall(),
+			"openstack_network":         resourceNetwork(),
+			"openstack_subnet":          resourceSubnet(),
+			"openstack_router":          resourceRouter(),
+			"openstack_security_group":  resourceSecurityGroup(),
+			"openstack_compute":         resourceCompute(),
+			"openstack_lbaas":           resourceLBaaS(),
+			"openstack_firewall":        resourceFirewall(),
+			"openstack_firewall_policy": resourceFirewallPolicy(),
 		},
 
 		ConfigureFunc: providerConfigure,
