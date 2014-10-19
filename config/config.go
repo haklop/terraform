@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,10 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/mitchellh/reflectwalk"
 )
+
+// NameRegexp is the regular expression that all names (modules, providers,
+// resources, etc.) must follow.
+var NameRegexp = regexp.MustCompile(`\A[A-Za-z0-9\-\_]+\z`)
 
 // Config is the configuration that comes from loading a collection
 // of Terraform templates.
@@ -201,17 +206,22 @@ func (c *Config) Validate() error {
 
 	// Check that all count variables are valid.
 	for source, vs := range vars {
-		for _, v := range vs {
-			cv, ok := v.(*CountVariable)
-			if !ok {
-				continue
-			}
-
-			if cv.Type == CountValueInvalid {
-				errs = append(errs, fmt.Errorf(
-					"%s: invalid count variable: %s",
-					source,
-					cv.FullKey()))
+		for _, rawV := range vs {
+			switch v := rawV.(type) {
+			case *CountVariable:
+				if v.Type == CountValueInvalid {
+					errs = append(errs, fmt.Errorf(
+						"%s: invalid count variable: %s",
+						source,
+						v.FullKey()))
+				}
+			case *PathVariable:
+				if v.Type == PathValueInvalid {
+					errs = append(errs, fmt.Errorf(
+						"%s: invalid path variable: %s",
+						source,
+						v.FullKey()))
+				}
 			}
 		}
 	}
@@ -220,12 +230,38 @@ func (c *Config) Validate() error {
 	modules := make(map[string]*Module)
 	dupped := make(map[string]struct{})
 	for _, m := range c.Modules {
+		// Check for duplicates
 		if _, ok := modules[m.Id()]; ok {
 			if _, ok := dupped[m.Id()]; !ok {
 				dupped[m.Id()] = struct{}{}
 
 				errs = append(errs, fmt.Errorf(
 					"%s: module repeated multiple times",
+					m.Id()))
+			}
+		}
+
+		if _, ok := modules[m.Id()]; !ok {
+			// If we haven't seen this module before, check that the
+			// source has no interpolations.
+			rc, err := NewRawConfig(map[string]interface{}{
+				"root": m.Source,
+			})
+			if err != nil {
+				errs = append(errs, fmt.Errorf(
+					"%s: module source error: %s",
+					m.Id(), err))
+			} else if len(rc.Interpolations) > 0 {
+				errs = append(errs, fmt.Errorf(
+					"%s: module source cannot contain interpolations",
+					m.Id()))
+			}
+
+			// Check that the name matches our regexp
+			if !NameRegexp.Match([]byte(m.Name)) {
+				errs = append(errs, fmt.Errorf(
+					"%s: module name can only contain letters, numbers, "+
+						"dashes, and underscores",
 					m.Id()))
 			}
 		}
@@ -352,6 +388,17 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Check that all variables are in the proper context
+	for source, rc := range c.rawConfigs() {
+		walker := &interpolationWalker{
+			ContextF: c.validateVarContextFn(source, &errs),
+		}
+		if err := reflectwalk.Walk(rc.Raw, walker); err != nil {
+			errs = append(errs, fmt.Errorf(
+				"%s: error reading config: %s", source, err))
+		}
+	}
+
 	if len(errs) > 0 {
 		return &multierror.Error{Errors: errs}
 	}
@@ -364,31 +411,55 @@ func (c *Config) Validate() error {
 // are valid in the Validate step.
 func (c *Config) InterpolatedVariables() map[string][]InterpolatedVariable {
 	result := make(map[string][]InterpolatedVariable)
-	for _, pc := range c.ProviderConfigs {
-		source := fmt.Sprintf("provider config '%s'", pc.Name)
-		for _, v := range pc.RawConfig.Variables {
+	for source, rc := range c.rawConfigs() {
+		for _, v := range rc.Variables {
 			result[source] = append(result[source], v)
 		}
+	}
+	return result
+}
+
+// rawConfigs returns all of the RawConfigs that are available keyed by
+// a human-friendly source.
+func (c *Config) rawConfigs() map[string]*RawConfig {
+	result := make(map[string]*RawConfig)
+	for _, pc := range c.ProviderConfigs {
+		source := fmt.Sprintf("provider config '%s'", pc.Name)
+		result[source] = pc.RawConfig
 	}
 
 	for _, rc := range c.Resources {
 		source := fmt.Sprintf("resource '%s'", rc.Id())
-		for _, v := range rc.RawCount.Variables {
-			result[source] = append(result[source], v)
-		}
-		for _, v := range rc.RawConfig.Variables {
-			result[source] = append(result[source], v)
-		}
+		result[source+" count"] = rc.RawCount
+		result[source+" config"] = rc.RawConfig
 	}
 
 	for _, o := range c.Outputs {
 		source := fmt.Sprintf("output '%s'", o.Name)
-		for _, v := range o.RawConfig.Variables {
-			result[source] = append(result[source], v)
-		}
+		result[source] = o.RawConfig
 	}
 
 	return result
+}
+
+func (c *Config) validateVarContextFn(
+	source string, errs *[]error) interpolationWalkerContextFunc {
+	return func(loc reflectwalk.Location, i Interpolation) {
+		vi, ok := i.(*VariableInterpolation)
+		if !ok {
+			return
+		}
+
+		rv, ok := vi.Variable.(*ResourceVariable)
+		if !ok {
+			return
+		}
+
+		if rv.Multi && rv.Index == -1 && loc != reflectwalk.SliceElem {
+			*errs = append(*errs, fmt.Errorf(
+				"%s: multi-variable must be in a slice", source))
+		}
+	}
 }
 
 func (m *Module) mergerName() string {

@@ -72,6 +72,9 @@ type Schema struct {
 	// If Required is true above, then Default cannot be set. DefaultFunc
 	// can be set with Required. If the DefaultFunc returns nil, then there
 	// will no default and the user will be asked to fill it in.
+	//
+	// If either of these is set, then the user won't be asked for input
+	// for this key if the default is not nil.
 	Default     interface{}
 	DefaultFunc SchemaDefaultFunc
 
@@ -81,6 +84,8 @@ type Schema struct {
 	Description string
 
 	// InputDefault is the default value to use for when inputs are requested.
+	// This differs from Default in that if Default is set, no input is
+	// asked for. If Input is asked, this will be the default value offered.
 	InputDefault string
 
 	// The fields below relate to diffs.
@@ -140,6 +145,10 @@ func (s *Schema) GoString() string {
 func (s *Schema) finalizeDiff(
 	d *terraform.ResourceAttrDiff) *terraform.ResourceAttrDiff {
 	if d == nil {
+		return d
+	}
+
+	if d.NewRemoved {
 		return d
 	}
 
@@ -304,6 +313,21 @@ func (m schemaMap) Input(
 			continue
 		}
 
+		// Skip if it has a default
+		if v.Default != nil {
+			continue
+		}
+		if f := v.DefaultFunc; f != nil {
+			value, err := f()
+			if err != nil {
+				return nil, fmt.Errorf(
+					"%s: error loading default: %s", k, err)
+			}
+			if value != nil {
+				continue
+			}
+		}
+
 		var value interface{}
 		var err error
 		switch v.Type {
@@ -322,7 +346,7 @@ func (m schemaMap) Input(
 				"%s: %s", k, err)
 		}
 
-		c.Raw[k] = value
+		c.Config[k] = value
 	}
 
 	return c, nil
@@ -430,7 +454,8 @@ func (m schemaMap) diffList(
 	schema *Schema,
 	diff *terraform.InstanceDiff,
 	d *ResourceData) error {
-	o, n, _ := d.diffChange(k)
+	o, n, _, computedList := d.diffChange(k)
+	nSet := n != nil
 
 	// If we have an old value, but no new value set but we're computed,
 	// then nothing has changed.
@@ -453,9 +478,26 @@ func (m schemaMap) diffList(
 	os := o.([]interface{})
 	vs := n.([]interface{})
 
+	// If the new value was set, and the two are equal, then we're done.
+	// We have to do this check here because sets might be NOT
+	// reflect.DeepEqual so we need to wait until we get the []interface{}
+	if nSet && reflect.DeepEqual(os, vs) {
+		return nil
+	}
+
 	// Get the counts
 	oldLen := len(os)
 	newLen := len(vs)
+	oldStr := strconv.FormatInt(int64(oldLen), 10)
+
+	// If the whole list is computed, then say that the # is computed
+	if computedList {
+		diff.Attributes[k+".#"] = &terraform.ResourceAttrDiff{
+			Old:         oldStr,
+			NewComputed: true,
+		}
+		return nil
+	}
 
 	// If the counts are not the same, then record that diff
 	changed := oldLen != newLen
@@ -467,11 +509,11 @@ func (m schemaMap) diffList(
 			ForceNew: schema.ForceNew,
 		}
 
-		oldStr := ""
 		newStr := ""
 		if !computed {
-			oldStr = strconv.FormatInt(int64(oldLen), 10)
 			newStr = strconv.FormatInt(int64(newLen), 10)
+		} else {
+			oldStr = ""
 		}
 
 		diff.Attributes[k+".#"] = countSchema.finalizeDiff(&terraform.ResourceAttrDiff{
@@ -530,7 +572,7 @@ func (m schemaMap) diffMap(
 
 	// First get all the values from the state
 	var stateMap, configMap map[string]string
-	o, n, _ := d.diffChange(k)
+	o, n, _, _ := d.diffChange(k)
 	if err := mapstructure.WeakDecode(o, &stateMap); err != nil {
 		return fmt.Errorf("%s: %s", k, err)
 	}
@@ -577,7 +619,7 @@ func (m schemaMap) diffString(
 	d *ResourceData) error {
 	var originalN interface{}
 	var os, ns string
-	o, n, _ := d.diffChange(k)
+	o, n, _, _ := d.diffChange(k)
 	if n == nil {
 		n = schema.Default
 		if schema.DefaultFunc != nil {
@@ -615,6 +657,9 @@ func (m schemaMap) diffString(
 	removed := false
 	if o != nil && n == nil {
 		removed = true
+	}
+	if removed && schema.Computed {
+		return nil
 	}
 
 	diff.Attributes[k] = schema.finalizeDiff(&terraform.ResourceAttrDiff{
@@ -768,7 +813,14 @@ func (m schemaMap) validatePrimitive(
 	raw interface{},
 	schema *Schema,
 	c *terraform.ResourceConfig) ([]string, []error) {
+	if c.IsComputed(k) {
+		// If the key is being computed, then it is not an error
+		return nil, nil
+	}
+
 	switch schema.Type {
+	case TypeSet:
+		fallthrough
 	case TypeList:
 		return m.validateList(k, raw, schema, c)
 	case TypeInt:

@@ -1,4 +1,36 @@
-## 0.3.0 (unreleased)
+## 0.3.1 (unreleased)
+
+BUG FIXES:
+
+  * core: Remove panic case when applying with a plan that generates no
+      new state. [GH-403]
+  * core: Fix a hang that can occur with enough resources. [GH-410]
+  * core: Config validation will not error if the field is being
+      computed so the value is still unknown.
+  * core: If a resource fails to create and has provisioners, it is
+      marked as tainted. [GH-434]
+  * core: Set types are validated to be sets. [GH-413]
+  * core: Fix crash case when destroying with tainted resources. [GH-412]
+  * core: Don't execute provisioners in some cases on destroy.
+  * core: Inherited provider configurations will be properly interpolated. [GH-418]
+  * providers/aws: Refresh of launch configs and autoscale groups load
+      the correct data and don't incorrectly recreate themselves. [GH-425]
+  * providers/aws: Fix case where ELB would incorrectly plan to modify
+      listeners (with the same data) in some cases.
+  * providers/aws: Retry destroying internet gateway for some amount of time
+      if there is a dependency violation since it is probably just eventual
+      consistency (public facing resources being destroyed). [GH-447]
+  * providers/aws: Retry deleting security groups for some amount of time
+      if there is a dependency violation since it is probably just eventual
+      consistency. [GH-436]
+  * providers/aws: Retry deleting subnet for some amount of time if there is a
+      dependency violation since probably asynchronous destroy events take
+      place still. [GH-449]
+  * providers/aws: Drain autoscale groups before deleting. [GH-435]
+  * providers/aws: Fix crash case if launch config is manually deleted. [GH-421]
+  * providers/aws: Disassociate EIP before destroying.
+
+## 0.3.0 (October 14, 2014)
 
 FEATURES:
 
@@ -22,13 +54,17 @@ FEATURES:
     variables).
   * The current index for a resource with a `count` set can be interpolated
     using `${count.index}`.
+  * Various paths can be interpolated with the `path.X` variables. For example,
+    the path to the current module can be interpolated using `${path.module}`.
 
 IMPROVEMENTS:
 
   * config: Trailing commas are now allowed for the final elements of lists.
   * core: Plugins are loaded from `~/.terraform.d/plugins` (Unix) or
     `%USERDATA%/terraform.d/plugins` (Windows).
+  * command/show: With no arguments, it will show the default state. [GH-349]
   * helper/schema: Can now have default values. [GH-245]
+  * providers/aws: Tag support for most resources.
   * providers/aws: New resource `db_subnet_group`. [GH-295]
   * providers/aws: Add `map_public_ip_on_launch` for subnets. [GH-285]
   * providers/aws: Add `iam_instance_profile` for instances. [GH-319]
@@ -36,15 +72,42 @@ IMPROVEMENTS:
   * providers/aws: Add `ssl_certificate_id` for ELB listeners. [GH-350]
   * providers/aws: Add `self` option for security groups for ingress
       rules with self as source. [GH-303]
+  * providers/aws: Add `iam_instance_profile` option to
+      `aws_launch_configuration`. [GH-371]
+  * providers/aws: Non-destructive update of `desired_capacity` for
+      autoscale groups.
+  * providers/aws: Add `main_route_table_id` attribute to VPCs. [GH-193]
+  * providers/consul: Support tokens. [GH-396]
   * providers/google: Support `target_tags` for firewalls. [GH-324]
+  * providers/google: `google_compute_instance` supports `can_ip_forward` [GH-375]
+  * providers/google: `google_compute_disk` supports `type` to support disks
+      such as SSDs. [GH-351]
+  * provisioners/local-exec: Output from command is shown in CLI output. [GH-311]
+  * provisioners/remote-exec: Output from command is shown in CLI output. [GH-311]
 
 BUG FIXES:
 
   * core: Providers are validated even without a `provider` block. [GH-284]
   * core: In the case of error, walk all non-dependent trees.
   * core: Plugin loading from CWD works properly.
+  * core: Fix many edge cases surrounding the `count` meta-parameter.
+  * core: Strings in the configuration can escape double-quotes with the
+      standard `\"` syntax.
+  * core: Error parsing CLI config will show properly. [GH-288]
+  * core: More than one Ctrl-C will exit immediately.
   * providers/aws: autoscaling_group can be launched into a vpc [GH-259]
   * providers/aws: not an error when RDS instance is deleted manually. [GH-307]
+  * providers/aws: Retry deleting subnet for some time while AWS eventually
+      destroys dependencies. [GH-357]
+  * providers/aws: More robust destroy for route53 records. [GH-342]
+  * providers/aws: ELB generates much more correct plans without extranneous
+      data.
+  * providers/aws: ELB works properly with dynamically changing
+      count of instances.
+  * providers/aws: Terraform can handle ELBs deleted manually. [GH-304]
+  * providers/aws: Report errors properly if RDS fails to delete. [GH-310]
+  * providers/aws: Wait for launch configuration to exist after creation
+      (AWS eventual consistency) [GH-302]
 
 ## 0.2.2 (September 9, 2014)
 

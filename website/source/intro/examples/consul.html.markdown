@@ -6,6 +6,8 @@ sidebar_current: "examples-consul"
 
 # Consul Example
 
+[**Example Contents**](https://github.com/hashicorp/terraform/tree/master/examples/consul)
+
 [Consul](http://www.consul.io) is a tool for service discovery, configuration
 and orchestration. The Key/Value store it provides is often used to store
 application configuration and information about the infrastructure necessary
@@ -52,79 +54,3 @@ application relies on ELB for routing, Terraform can update the application's
 configuration directly by setting the ELB address into Consul. Any resource
 attribute can be stored in Consul, allowing an operator to capture anything
 useful.
-
-
-## Command
-
-```
-terraform apply \
-    -var 'aws_access_key=YOUR_KEY' \
-    -var 'aws_secret_key=YOUR_KEY'
-```
-
-## Configuration
-
-```
-# Declare our variables, require access and secret keys
-variable "aws_access_key" {}
-variable "aws_secret_key" {}
-variable "aws_region" {
-    default = "us-east-1"
-}
-
-# AMI's from http://cloud-images.ubuntu.com/locator/ec2/
-variable "aws_amis" {
-    default = {
-        "eu-west-1": "ami-b1cf19c6",
-        "us-east-1": "ami-de7ab6b6",
-        "us-west-1": "ami-3f75767a",
-        "us-west-2": "ami-21f78e11",
-    }
-}
-
-# Setup the Consul provisioner to use the demo cluster
-provider "consul" {
-    address = "demo.consul.io:80"
-    datacenter = "nyc1"
-}
-
-# Setup an AWS provider
-provider "aws" {
-    access_key = "${var.aws_access_key}"
-    secret_key = "${var.aws_secret_key}"
-    region = "${var.aws_region}"
-}
-
-# Setup a key in Consul to provide inputs
-resource "consul_keys" "input" {
-    key {
-        name = "size"
-        path = "tf_test/size"
-        default = "m1.small"
-    }
-}
-
-# Setup a new AWS instance using a dynamic ami and
-# instance type
-resource "aws_instance" "test" {
-    ami = "${lookup(var.aws_amis, var.aws_region)}"
-    instance_type = "${consul_keys.input.var.size}"
-}
-
-# Setup a key in Consul to store the instance id and
-# the DNS name of the instance
-resource "consul_keys" "test" {
-    key {
-        name = "id"
-        path = "tf_test/id"
-        value = "${aws_instance.test.id}"
-        delete = true
-    }
-    key {
-        name = "address"
-        path = "tf_test/public_dns"
-        value = "${aws_instance.test.public_dns}"
-        delete = true
-    }
-}
-```

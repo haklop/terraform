@@ -122,6 +122,34 @@ func TestAccAWSInstance_vpc(t *testing.T) {
 	})
 }
 
+func TestAccInstance_tags(t *testing.T) {
+	var v ec2.Instance
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckInstanceDestroy,
+		Steps: []resource.TestStep{
+			resource.TestStep{
+				Config: testAccCheckInstanceConfigTags,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckInstanceExists("aws_instance.foo", &v),
+					testAccCheckTags(&v.Tags, "foo", "bar"),
+				),
+			},
+
+			resource.TestStep{
+				Config: testAccCheckInstanceConfigTagsUpdate,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckInstanceExists("aws_instance.foo", &v),
+					testAccCheckTags(&v.Tags, "foo", ""),
+					testAccCheckTags(&v.Tags, "bar", "baz"),
+				),
+			},
+		},
+	})
+}
+
 func testAccCheckInstanceDestroy(s *terraform.State) error {
 	conn := testAccProvider.ec2conn
 
@@ -259,5 +287,21 @@ resource "aws_instance" "foo" {
 	instance_type = "m1.small"
 	subnet_id = "${aws_subnet.foo.id}"
 	associate_public_ip_address = true
+}
+`
+
+const testAccCheckInstanceConfigTags = `
+resource "aws_instance" "foo" {
+	tags {
+		foo = "bar"
+	}
+}
+`
+
+const testAccCheckInstanceConfigTagsUpdate = `
+resource "aws_instance" "foo" {
+	tags {
+		bar = "baz"
+	}
 }
 `

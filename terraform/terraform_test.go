@@ -126,6 +126,20 @@ aws_instance.foo:
   type = aws_instance
 `
 
+const testTerraformInputProviderOnlyStr = `
+aws_instance.foo:
+  ID = foo
+  foo = us-west-2
+  type = aws_instance
+`
+
+const testTerraformInputVarOnlyStr = `
+aws_instance.foo:
+  ID = foo
+  foo = us-east-1
+  type = aws_instance
+`
+
 const testTerraformInputVarsStr = `
 aws_instance.bar:
   ID = foo
@@ -192,6 +206,39 @@ aws_instance.foo:
   type = aws_instance
 `
 
+const testTerraformApplyCountDecStr = `
+aws_instance.foo.0:
+  ID = bar
+  foo = foo
+  type = aws_instance
+aws_instance.foo.1:
+  ID = bar
+  foo = foo
+  type = aws_instance
+`
+
+const testTerraformApplyCountDecToOneStr = `
+aws_instance.foo.0:
+  ID = bar
+  foo = foo
+  type = aws_instance
+`
+
+const testTerraformApplyCountTaintedStr = `
+<no state>
+`
+
+const testTerraformApplyCountVariableStr = `
+aws_instance.foo.0:
+  ID = foo
+  foo = foo
+  type = aws_instance
+aws_instance.foo.1:
+  ID = foo
+  foo = foo
+  type = aws_instance
+`
+
 const testTerraformApplyMinimalStr = `
 aws_instance.bar:
   ID = foo
@@ -237,6 +284,16 @@ aws_instance.foo:
   ID = foo
   num = 2
   type = aws_instance
+`
+
+const testTerraformApplyProvisionerFailCreateStr = `
+aws_instance.bar: (1 tainted)
+  ID = <not created>
+  Tainted ID 1 = foo
+`
+
+const testTerraformApplyProvisionerFailCreateNoIdStr = `
+<no state>
 `
 
 const testTerraformApplyProvisionerFailCreateBeforeDestroyStr = `
@@ -870,6 +927,20 @@ CREATE: aws_instance.bar
 CREATE: aws_instance.foo
   num:  "" => "2"
   type: "" => "aws_instance"
+
+STATE:
+
+<no state>
+`
+
+const testTerraformPlanPathVarStr = `
+DIFF:
+
+CREATE: aws_instance.foo
+  cwd:    "" => "%s/barpath"
+  module: "" => "%s/foopath"
+  root:   "" => "%s/barpath"
+  type:   "" => "aws_instance"
 
 STATE:
 

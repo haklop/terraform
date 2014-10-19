@@ -60,6 +60,13 @@ func resourceComputeInstance() *schema.Resource {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
+
+						"type": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+							ForceNew: true,
+						},
+
 						"auto_delete": &schema.Schema{
 							Type:     schema.TypeBool,
 							Optional: true,
@@ -95,6 +102,13 @@ func resourceComputeInstance() *schema.Resource {
 						},
 					},
 				},
+			},
+
+			"can_ip_forward": &schema.Schema{
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+				ForceNew: true,
 			},
 
 			"metadata": &schema.Schema{
@@ -197,6 +211,18 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 			}
 		}
 
+		if v, ok := d.GetOk(prefix + ".type"); ok {
+			diskTypeName := v.(string)
+			diskType, err := readDiskType(config, zone, diskTypeName)
+			if err != nil {
+				return fmt.Errorf(
+					"Error loading disk type '%s': %s",
+					diskTypeName, err)
+			}
+
+			disk.InitializeParams.DiskType = diskType.SelfLink
+		}
+
 		disks = append(disks, &disk)
 	}
 
@@ -230,6 +256,7 @@ func resourceComputeInstanceCreate(d *schema.ResourceData, meta interface{}) err
 
 	// Create the instance information
 	instance := compute.Instance{
+		CanIpForward:      d.Get("can_ip_forward").(bool),
 		Description:       d.Get("description").(string),
 		Disks:             disks,
 		MachineType:       machineType.SelfLink,
@@ -304,6 +331,8 @@ func resourceComputeInstanceRead(d *schema.ResourceData, meta interface{}) error
 
 		return fmt.Errorf("Error reading instance: %s", err)
 	}
+
+	d.Set("can_ip_forward", instance.CanIpForward)
 
 	// Set the networks
 	for i, iface := range instance.NetworkInterfaces {

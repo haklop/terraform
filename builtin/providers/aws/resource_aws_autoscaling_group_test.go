@@ -9,7 +9,7 @@ import (
 	"github.com/mitchellh/goamz/autoscaling"
 )
 
-func TestAccAWSAutoScalingGroup(t *testing.T) {
+func TestAccAWSAutoScalingGroup_basic(t *testing.T) {
 	var group autoscaling.AutoScalingGroup
 
 	resource.Test(t, resource.TestCase{
@@ -23,7 +23,7 @@ func TestAccAWSAutoScalingGroup(t *testing.T) {
 					testAccCheckAWSAutoScalingGroupExists("aws_autoscaling_group.bar", &group),
 					testAccCheckAWSAutoScalingGroupAttributes(&group),
 					resource.TestCheckResourceAttr(
-						"aws_autoscaling_group.bar", "availability_zones.#.0", "us-west-2a"),
+						"aws_autoscaling_group.bar", "availability_zones.0", "us-west-2a"),
 					resource.TestCheckResourceAttr(
 						"aws_autoscaling_group.bar", "name", "foobar3-terraform-test"),
 					resource.TestCheckResourceAttr(
@@ -38,6 +38,15 @@ func TestAccAWSAutoScalingGroup(t *testing.T) {
 						"aws_autoscaling_group.bar", "desired_capacity", "4"),
 					resource.TestCheckResourceAttr(
 						"aws_autoscaling_group.bar", "force_delete", "true"),
+				),
+			},
+
+			resource.TestStep{
+				Config: testAccAWSAutoScalingGroupConfigUpdate,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckAWSAutoScalingGroupExists("aws_autoscaling_group.bar", &group),
+					resource.TestCheckResourceAttr(
+						"aws_autoscaling_group.bar", "desired_capacity", "5"),
 				),
 			},
 		},
@@ -98,8 +107,8 @@ func testAccCheckAWSAutoScalingGroupDestroy(s *terraform.State) error {
 
 func testAccCheckAWSAutoScalingGroupAttributes(group *autoscaling.AutoScalingGroup) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		if group.AvailabilityZones[0].AvailabilityZone != "us-west-2a" {
-			return fmt.Errorf("Bad availability_zones: %s", group.AvailabilityZones[0].AvailabilityZone)
+		if group.AvailabilityZones[0] != "us-west-2a" {
+			return fmt.Errorf("Bad availability_zones: %s", group.AvailabilityZones[0])
 		}
 
 		if group.Name != "foobar3-terraform-test" {
@@ -126,8 +135,8 @@ func testAccCheckAWSAutoScalingGroupAttributes(group *autoscaling.AutoScalingGro
 			return fmt.Errorf("Bad desired_capacity: %d", group.DesiredCapacity)
 		}
 
-		if group.LaunchConfigurationName != "" {
-			return fmt.Errorf("Bad desired_capacity: %d", group.DesiredCapacity)
+		if group.LaunchConfigurationName == "" {
+			return fmt.Errorf("Bad launch configuration name: %s", group.LaunchConfigurationName)
 		}
 
 		return nil
@@ -136,8 +145,8 @@ func testAccCheckAWSAutoScalingGroupAttributes(group *autoscaling.AutoScalingGro
 
 func testAccCheckAWSAutoScalingGroupAttributesLoadBalancer(group *autoscaling.AutoScalingGroup) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		if group.LoadBalancerNames[0].LoadBalancerName != "foobar-terraform-test" {
-			return fmt.Errorf("Bad load_balancers: %s", group.LoadBalancerNames[0].LoadBalancerName)
+		if group.LoadBalancerNames[0] != "foobar-terraform-test" {
+			return fmt.Errorf("Bad load_balancers: %s", group.LoadBalancerNames[0])
 		}
 
 		return nil
@@ -192,6 +201,27 @@ resource "aws_autoscaling_group" "bar" {
   health_check_grace_period = 300
   health_check_type = "ELB"
   desired_capacity = 4
+  force_delete = true
+
+  launch_configuration = "${aws_launch_configuration.foobar.name}"
+}
+`
+
+const testAccAWSAutoScalingGroupConfigUpdate = `
+resource "aws_launch_configuration" "foobar" {
+  name = "foobarautoscaling-terraform-test"
+  image_id = "ami-21f78e11"
+  instance_type = "t1.micro"
+}
+
+resource "aws_autoscaling_group" "bar" {
+  availability_zones = ["us-west-2a"]
+  name = "foobar3-terraform-test"
+  max_size = 5
+  min_size = 2
+  health_check_grace_period = 300
+  health_check_type = "ELB"
+  desired_capacity = 5
   force_delete = true
 
   launch_configuration = "${aws_launch_configuration.foobar.name}"

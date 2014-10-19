@@ -26,7 +26,7 @@ type ApplyCommand struct {
 }
 
 func (c *ApplyCommand) Run(args []string) int {
-	var refresh bool
+	var destroyForce, refresh bool
 	var statePath, stateOutPath, backupPath string
 
 	args = c.Meta.process(args, true)
@@ -37,6 +37,9 @@ func (c *ApplyCommand) Run(args []string) int {
 	}
 
 	cmdFlags := c.Meta.flagSet(cmdName)
+	if c.Destroy {
+		cmdFlags.BoolVar(&destroyForce, "force", false, "force")
+	}
 	cmdFlags.BoolVar(&refresh, "refresh", true, "refresh")
 	cmdFlags.StringVar(&statePath, "state", DefaultStateFilename, "path")
 	cmdFlags.StringVar(&stateOutPath, "state-out", "", "path")
@@ -114,29 +117,26 @@ func (c *ApplyCommand) Run(args []string) int {
 			"Destroy can't be called with a plan file."))
 		return 1
 	}
-	if c.InputEnabled() {
-		if c.Destroy {
-			v, err := c.UIInput().Input(&terraform.InputOpts{
-				Id:    "destroy",
-				Query: "Do you really want to destroy?",
-				Description: "Terraform will delete all your manage infrastructure.\n" +
-					"There is no undo. Only 'yes' will be accepted to confirm.",
-			})
-			if err != nil {
-				c.Ui.Error(fmt.Sprintf("Error asking for confirmation: %s", err))
-				return 1
-			}
-			if v != "yes" {
-				c.Ui.Output("Destroy cancelled.")
-				return 1
-			}
+	if !destroyForce && c.Destroy {
+		v, err := c.UIInput().Input(&terraform.InputOpts{
+			Id:    "destroy",
+			Query: "Do you really want to destroy?",
+			Description: "Terraform will delete all your managed infrastructure.\n" +
+				"There is no undo. Only 'yes' will be accepted to confirm.",
+		})
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Error asking for confirmation: %s", err))
+			return 1
 		}
-
-		if !planned {
-			if err := ctx.Input(); err != nil {
-				c.Ui.Error(fmt.Sprintf("Error configuring: %s", err))
-				return 1
-			}
+		if v != "yes" {
+			c.Ui.Output("Destroy cancelled.")
+			return 1
+		}
+	}
+	if !planned {
+		if err := ctx.Input(c.InputMode()); err != nil {
+			c.Ui.Error(fmt.Sprintf("Error configuring: %s", err))
+			return 1
 		}
 	}
 	if !validateContext(ctx, c.Ui) {
@@ -195,7 +195,7 @@ func (c *ApplyCommand) Run(args []string) int {
 		c.Ui.Output("Interrupt received. Gracefully shutting down...")
 
 		// Stop execution
-		ctx.Stop()
+		go ctx.Stop()
 
 		// Still get the result, since there is still one
 		select {
@@ -254,7 +254,7 @@ func (c *ApplyCommand) Run(args []string) int {
 
 	// If we have outputs, then output those at the end.
 	var outputs map[string]string
-	if state != nil {
+	if !c.Destroy && state != nil {
 		outputs = state.RootModule().Outputs
 	}
 	if len(outputs) > 0 {
@@ -362,7 +362,7 @@ Options:
                          modifying. Defaults to the "-state-out" path with
                          ".backup" extension. Set to "-" to disable backup.
 
-  -input=true            Ask for input for destroy confirmation.
+  -force                 Don't ask for input for destroy confirmation.
 
   -no-color              If specified, output won't contain any color.
 

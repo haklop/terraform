@@ -1,10 +1,8 @@
 package aws
 
 import (
-	"strconv"
 	"strings"
 
-	"github.com/mitchellh/goamz/autoscaling"
 	"github.com/mitchellh/goamz/ec2"
 	"github.com/mitchellh/goamz/elb"
 )
@@ -16,27 +14,19 @@ func expandListeners(configured []interface{}) ([]elb.Listener, error) {
 
 	// Loop over our configured listeners and create
 	// an array of goamz compatabile objects
-	for _, listener := range configured {
-		newL := listener.(map[string]interface{})
-
-		instancePort, err := strconv.ParseInt(newL["instance_port"].(string), 0, 0)
-		lbPort, err := strconv.ParseInt(newL["lb_port"].(string), 0, 0)
-
-		if err != nil {
-			return nil, err
-		}
+	for _, lRaw := range configured {
+		data := lRaw.(map[string]interface{})
 
 		l := elb.Listener{
-			InstancePort:     instancePort,
-			InstanceProtocol: newL["instance_protocol"].(string),
-			LoadBalancerPort: lbPort,
-			Protocol:         newL["lb_protocol"].(string),
+			InstancePort:     int64(data["instance_port"].(int)),
+			InstanceProtocol: data["instance_protocol"].(string),
+			LoadBalancerPort: int64(data["lb_port"].(int)),
+			Protocol:         data["lb_protocol"].(string),
 		}
 
-		if attr, ok := newL["ssl_certificate_id"].(string); ok {
-			l.SSLCertificateId = attr
+		if v, ok := data["ssl_certificate_id"]; ok {
+			l.SSLCertificateId = v.(string)
 		}
-
 
 		listeners = append(listeners, l)
 	}
@@ -147,35 +137,6 @@ func flattenSecurityGroups(list []ec2.UserSecurityGroup) []string {
 	return result
 }
 
-// Flattens an array of SecurityGroups into a []string
-func flattenAutoscalingSecurityGroups(list []autoscaling.SecurityGroup) []string {
-	result := make([]string, 0, len(list))
-	for _, g := range list {
-		result = append(result, g.SecurityGroup)
-	}
-	return result
-}
-
-// Flattens an array of AvailabilityZones into a []string
-func flattenAvailabilityZones(list []autoscaling.AvailabilityZone) []string {
-	result := make([]string, 0, len(list))
-	for _, g := range list {
-		result = append(result, g.AvailabilityZone)
-	}
-	return result
-}
-
-// Flattens an array of LoadBalancerName into a []string
-func flattenLoadBalancers(list []autoscaling.LoadBalancerName) []string {
-	result := make([]string, 0, len(list))
-	for _, g := range list {
-		if g.LoadBalancerName != "" {
-			result = append(result, g.LoadBalancerName)
-		}
-	}
-	return result
-}
-
 // Flattens an array of Instances into a []string
 func flattenInstances(list []elb.Instance) []string {
 	result := make([]string, 0, len(list))
@@ -185,17 +146,24 @@ func flattenInstances(list []elb.Instance) []string {
 	return result
 }
 
+// Flattens an array of Listeners into a []map[string]interface{}
+func flattenListeners(list []elb.Listener) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(list))
+	for _, i := range list {
+		result = append(result, map[string]interface{}{
+			"instance_port":      i.InstancePort,
+			"instance_protocol":  strings.ToLower(i.InstanceProtocol),
+			"ssl_certificate_id": i.SSLCertificateId,
+			"lb_port":            i.LoadBalancerPort,
+			"lb_protocol":        strings.ToLower(i.Protocol),
+		})
+	}
+	return result
+}
+
 // Takes the result of flatmap.Expand for an array of strings
 // and returns a []string
 func expandStringList(configured []interface{}) []string {
-	// here we special case the * expanded lists. For example:
-	//
-	//	 instances = ["${aws_instance.foo.*.id}"]
-	//
-	if len(configured) == 1 && strings.Contains(configured[0].(string), ",") {
-		return strings.Split(configured[0].(string), ",")
-	}
-
 	vs := make([]string, 0, len(configured))
 	for _, v := range configured {
 		vs = append(vs, v.(string))

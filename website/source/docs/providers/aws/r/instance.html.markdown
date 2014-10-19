@@ -12,10 +12,13 @@ and deleted. Instances also support [provisioning](/docs/provisioners/index.html
 ## Example Usage
 
 ```
-# Create a new instance of the ami-1234 on an m1.small node
+# Create a new instance of the ami-1234 on an m1.small node with an AWS Tag naming it "HelloWorld"
 resource "aws_instance" "web" {
     ami = "ami-1234"
     instance_type = "m1.small"
+    tags {
+        Name = "HelloWorld"
+    }
 }
 ```
 
@@ -41,6 +44,7 @@ The following arguments are supported:
 * `user_data` - (Optional) The user data to provide when launching the instance.
 * `iam_instance_profile` - (Optional) The IAM Instance Profile to
   launch the instance with.
+* `tags` - (Optional) A mapping of tags to assign to the resource.
 
 ## Attributes Reference
 

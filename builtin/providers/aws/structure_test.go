@@ -170,7 +170,14 @@ func Test_flattenIPPerms(t *testing.T) {
 }
 
 func Test_expandListeners(t *testing.T) {
-	expanded := flatmap.Expand(testConf(), "listener").([]interface{})
+	expanded := []interface{}{
+		map[string]interface{}{
+			"instance_port":     8000,
+			"lb_port":           80,
+			"instance_protocol": "http",
+			"lb_protocol":       "http",
+		},
+	}
 	listeners, err := expandListeners(expanded)
 	if err != nil {
 		t.Fatalf("bad: %#v", err)
@@ -228,22 +235,6 @@ func Test_flattenHealthCheck(t *testing.T) {
 func Test_expandStringList(t *testing.T) {
 	expanded := flatmap.Expand(testConf(), "availability_zones").([]interface{})
 	stringList := expandStringList(expanded)
-	expected := []string{
-		"us-east-1a",
-		"us-east-1b",
-	}
-
-	if !reflect.DeepEqual(stringList, expected) {
-		t.Fatalf(
-			"Got:\n\n%#v\n\nExpected:\n\n%#v\n",
-			stringList,
-			expected)
-	}
-
-}
-
-func Test_expandStringListWildcard(t *testing.T) {
-	stringList := expandStringList([]interface{}{"us-east-1a,us-east-1b"})
 	expected := []string{
 		"us-east-1a",
 		"us-east-1b",

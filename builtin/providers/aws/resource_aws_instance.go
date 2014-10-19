@@ -92,6 +92,7 @@ func resourceAwsInstance() *schema.Resource {
 				Type:     schema.TypeSet,
 				Optional: true,
 				Computed: true,
+				ForceNew: true,
 				Elem:     &schema.Schema{Type: schema.TypeString},
 				Set: func(v interface{}) int {
 					return hashcode.String(v.(string))
@@ -117,11 +118,13 @@ func resourceAwsInstance() *schema.Resource {
 				Type:     schema.TypeBool,
 				Optional: true,
 			},
+
 			"iam_instance_profile": &schema.Schema{
 				Type:     schema.TypeString,
 				ForceNew: true,
 				Optional: true,
 			},
+			"tags": tagsSchema(),
 		},
 	}
 }
@@ -245,6 +248,12 @@ func resourceAwsInstanceUpdate(d *schema.ResourceData, meta interface{}) error {
 		// persist the change...
 	}
 
+	if err := setTags(ec2conn, d); err != nil {
+		return err
+	} else {
+		d.SetPartial("tags")
+	}
+
 	return nil
 }
 
@@ -320,6 +329,7 @@ func resourceAwsInstanceRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("private_ip", instance.PrivateIpAddress)
 	d.Set("subnet_id", instance.SubnetId)
 	d.Set("ebs_optimized", instance.EbsOptimized)
+	d.Set("tags", tagsToMap(instance.Tags))
 
 	// Determine whether we're referring to security groups with
 	// IDs or names. We use a heuristic to figure this out. By default,

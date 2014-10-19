@@ -27,6 +27,9 @@ type Meta struct {
 	// This can be set by the command itself to provide extra hooks.
 	extraHooks []terraform.Hook
 
+	// This can be set by tests to change some directories
+	dataDir string
+
 	// Variables for the context (private)
 	autoKey       string
 	autoVariables map[string]string
@@ -95,7 +98,12 @@ func (m *Meta) Context(copts contextOpts) (*terraform.Context, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("Error loading config: %s", err)
 	}
-	err = mod.Load(m.moduleStorage(copts.Path), copts.GetMode)
+
+	dataDir := DefaultDataDirectory
+	if m.dataDir != "" {
+		dataDir = m.dataDir
+	}
+	err = mod.Load(m.moduleStorage(dataDir), copts.GetMode)
 	if err != nil {
 		return nil, false, fmt.Errorf("Error downloading modules: %s", err)
 	}
@@ -106,11 +114,20 @@ func (m *Meta) Context(copts contextOpts) (*terraform.Context, bool, error) {
 	return ctx, false, nil
 }
 
-// InputEnabled returns true if we should ask for input for context.
-func (m *Meta) InputEnabled() bool {
-	return !test && m.input &&
-		len(m.variables) == 0 &&
-		m.autoKey == ""
+// InputMode returns the type of input we should ask for in the form of
+// terraform.InputMode which is passed directly to Context.Input.
+func (m *Meta) InputMode() terraform.InputMode {
+	if test || !m.input {
+		return 0
+	}
+
+	var mode terraform.InputMode
+	mode |= terraform.InputModeProvider
+	if len(m.variables) == 0 && m.autoKey == "" {
+		mode |= terraform.InputModeVar
+	}
+
+	return mode
 }
 
 // UIInput returns a UIInput object to be used for asking for input.

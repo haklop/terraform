@@ -12,15 +12,6 @@ var resourceMap *resource.Map
 func init() {
 	resourceMap = &resource.Map{
 		Mapping: map[string]resource.Resource{
-			"aws_autoscaling_group": resource.Resource{
-				ConfigValidator: resource_aws_autoscaling_group_validation(),
-				Create:          resource_aws_autoscaling_group_create,
-				Destroy:         resource_aws_autoscaling_group_destroy,
-				Diff:            resource_aws_autoscaling_group_diff,
-				Refresh:         resource_aws_autoscaling_group_refresh,
-				Update:          resource_aws_autoscaling_group_update,
-			},
-
 			"aws_db_instance": resource.Resource{
 				ConfigValidator: resource_aws_db_instance_validation(),
 				Create:          resource_aws_db_instance_create,
@@ -38,29 +29,12 @@ func init() {
 				Refresh:         resource_aws_db_security_group_refresh,
 			},
 
-			"aws_elb": resource.Resource{
-				ConfigValidator: resource_aws_elb_validation(),
-				Create:          resource_aws_elb_create,
-				Update:          resource_aws_elb_update,
-				Destroy:         resource_aws_elb_destroy,
-				Diff:            resource_aws_elb_diff,
-				Refresh:         resource_aws_elb_refresh,
-			},
-
 			"aws_internet_gateway": resource.Resource{
 				Create:  resource_aws_internet_gateway_create,
 				Destroy: resource_aws_internet_gateway_destroy,
 				Diff:    resource_aws_internet_gateway_diff,
 				Refresh: resource_aws_internet_gateway_refresh,
 				Update:  resource_aws_internet_gateway_update,
-			},
-
-			"aws_launch_configuration": resource.Resource{
-				ConfigValidator: resource_aws_launch_configuration_validation(),
-				Create:          resource_aws_launch_configuration_create,
-				Destroy:         resource_aws_launch_configuration_destroy,
-				Diff:            resource_aws_launch_configuration_diff,
-				Refresh:         resource_aws_launch_configuration_refresh,
 			},
 
 			"aws_route_table": resource.Resource{
@@ -125,14 +99,6 @@ func init() {
 				Destroy: resource_aws_subnet_destroy,
 				Diff:    resource_aws_subnet_diff,
 				Refresh: resource_aws_subnet_refresh,
-			},
-
-			"aws_vpc": resource.Resource{
-				Create:  resource_aws_vpc_create,
-				Destroy: resource_aws_vpc_destroy,
-				Diff:    resource_aws_vpc_diff,
-				Refresh: resource_aws_vpc_refresh,
-				Update:  resource_aws_vpc_update,
 			},
 		},
 	}

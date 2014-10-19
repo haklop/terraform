@@ -42,7 +42,7 @@ func (a *application) Update() error {
 
 func resourceHerokuApp() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceHerokuAppCreate,
+		Create: switchHerokuAppCreate,
 		Read:   resourceHerokuAppRead,
 		Update: resourceHerokuAppUpdate,
 		Delete: resourceHerokuAppDelete,
@@ -93,7 +93,22 @@ func resourceHerokuApp() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
+
+			"organization": &schema.Schema{
+				Type:        schema.TypeString,
+				Description: "Name of Organization to create application in. Leave blank for personal apps.",
+				Optional:    true,
+				ForceNew:    true,
+			},
 		},
+	}
+}
+
+func switchHerokuAppCreate(d *schema.ResourceData, meta interface{}) error {
+	if _, ok := d.GetOk("organization"); ok {
+		return resourceHerokuOrgAppCreate(d, meta)
+	} else {
+		return resourceHerokuAppCreate(d, meta)
 	}
 }
 
@@ -103,17 +118,17 @@ func resourceHerokuAppCreate(d *schema.ResourceData, meta interface{}) error {
 	// Build up our creation options
 	opts := heroku.AppCreateOpts{}
 
-	if v := d.Get("name"); v != nil {
+	if v, ok := d.GetOk("name"); ok {
 		vs := v.(string)
 		log.Printf("[DEBUG] App name: %s", vs)
 		opts.Name = &vs
 	}
-	if v := d.Get("region"); v != nil {
+	if v, ok := d.GetOk("region"); ok {
 		vs := v.(string)
 		log.Printf("[DEBUG] App region: %s", vs)
 		opts.Region = &vs
 	}
-	if v := d.Get("stack"); v != nil {
+	if v, ok := d.GetOk("stack"); ok {
 		vs := v.(string)
 		log.Printf("[DEBUG] App stack: %s", vs)
 		opts.Stack = &vs
@@ -128,7 +143,51 @@ func resourceHerokuAppCreate(d *schema.ResourceData, meta interface{}) error {
 	d.SetId(a.Name)
 	log.Printf("[INFO] App ID: %s", d.Id())
 
-	if v := d.Get("config_vars"); v != nil {
+	if v, ok := d.GetOk("config_vars"); ok {
+		err = update_config_vars(d.Id(), client, nil, v.([]interface{}))
+		if err != nil {
+			return err
+		}
+	}
+
+	return resourceHerokuAppRead(d, meta)
+}
+
+func resourceHerokuOrgAppCreate(d *schema.ResourceData, meta interface{}) error {
+	client := meta.(*heroku.Service)
+	// Build up our creation options
+	opts := heroku.OrganizationAppCreateOpts{}
+	if v, ok := d.GetOk("organization"); ok {
+		vs := v.(string)
+		log.Printf("[DEBUG] App name: %s", vs)
+		opts.Organization = &vs
+	}
+	if v, ok := d.GetOk("name"); ok {
+		vs := v.(string)
+		log.Printf("[DEBUG] App name: %s", vs)
+		opts.Name = &vs
+	}
+	if v, ok := d.GetOk("region"); ok {
+		vs := v.(string)
+		log.Printf("[DEBUG] App region: %s", vs)
+		opts.Region = &vs
+	}
+	if v, ok := d.GetOk("stack"); ok {
+		vs := v.(string)
+		log.Printf("[DEBUG] App stack: %s", vs)
+		opts.Stack = &vs
+	}
+
+	log.Printf("[DEBUG] Creating Heroku app...")
+	a, err := client.OrganizationAppCreate(opts)
+	if err != nil {
+		return err
+	}
+
+	d.SetId(a.Name)
+	log.Printf("[INFO] App ID: %s", d.Id())
+
+	if v, ok := d.GetOk("config_vars"); ok {
 		err = update_config_vars(d.Id(), client, nil, v.([]interface{}))
 		if err != nil {
 			return err

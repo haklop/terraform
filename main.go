@@ -88,9 +88,12 @@ func wrappedMain() int {
 	// Load the configuration
 	config := BuiltinConfig
 	if err := config.Discover(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering plugins: %s", err)
+		Ui.Error(fmt.Sprintf("Error discovering plugins: %s", err))
 		return 1
 	}
+
+	// Run checkpoint
+	go runCheckpoint(&config)
 
 	// Make sure we clean up any managed plugins at the end of this
 	defer plugin.CleanupClients()
@@ -123,14 +126,14 @@ func wrappedMain() int {
 	// define extra providers and provisioners.
 	clicfgFile, err := cliConfigFile()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading CLI configuration: \n\n%s\n", err)
+		Ui.Error(fmt.Sprintf("Error loading CLI configuration: \n\n%s", err))
 		return 1
 	}
 
 	if clicfgFile != "" {
 		usrcfg, err := LoadConfig(clicfgFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading CLI configuration: \n\n%s\n", err)
+			Ui.Error(fmt.Sprintf("Error loading CLI configuration: \n\n%s", err))
 			return 1
 		}
 
@@ -143,7 +146,7 @@ func wrappedMain() int {
 
 	exitCode, err := cli.Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error executing CLI: %s\n", err.Error())
+		Ui.Error(fmt.Sprintf("Error executing CLI: %s", err.Error()))
 		return 1
 	}
 
@@ -155,7 +158,7 @@ func cliConfigFile() (string, error) {
 	configFilePath := os.Getenv("TERRAFORM_CONFIG")
 	if configFilePath == "" {
 		var err error
-		configFilePath, err = configFile()
+		configFilePath, err = ConfigFile()
 		mustExist = false
 
 		if err != nil {

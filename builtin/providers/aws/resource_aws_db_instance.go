@@ -75,7 +75,7 @@ func resource_aws_db_instance_create(
 		opts.PubliclyAccessible = true
 	}
 
-	if attr = rs.Attributes["subnet_group_name"]; attr != "" {
+	if attr = rs.Attributes["db_subnet_group_name"]; attr != "" {
 		opts.DBSubnetGroupName = attr
 	}
 
@@ -99,9 +99,6 @@ func resource_aws_db_instance_create(
 	opts.MasterUserPassword = rs.Attributes["password"]
 	opts.EngineVersion = rs.Attributes["engine_version"]
 	opts.Engine = rs.Attributes["engine"]
-
-	// Don't keep the password around in the state
-	delete(rs.Attributes, "password")
 
 	log.Printf("[DEBUG] DB Instance create configuration: %#v", opts)
 	_, err = conn.CreateDBInstance(&opts)
@@ -163,11 +160,12 @@ func resource_aws_db_instance_destroy(
 	}
 
 	log.Printf("[DEBUG] DB Instance destroy configuration: %v", opts)
-	_, err := conn.DeleteDBInstance(&opts)
+	if _, err := conn.DeleteDBInstance(&opts); err != nil {
+		return err
+	}
 
 	log.Println(
 		"[INFO] Waiting for DB Instance to be destroyed")
-
 	stateConf := &resource.StateChangeConf{
 		Pending: []string{"creating", "backing-up",
 			"modifying", "deleting", "available"},
@@ -177,10 +175,7 @@ func resource_aws_db_instance_destroy(
 		MinTimeout: 10 * time.Second,
 		Delay:      30 * time.Second, // Wait 30 secs before starting
 	}
-
-	// Wait, catching any errors
-	_, err = stateConf.WaitForState()
-	if err != nil {
+	if _, err := stateConf.WaitForState(); err != nil {
 		return err
 	}
 
@@ -225,13 +220,13 @@ func resource_aws_db_instance_diff(
 			"maintenance_window":        diff.AttrTypeCreate,
 			"multi_az":                  diff.AttrTypeCreate,
 			"name":                      diff.AttrTypeCreate,
-			"password":                  diff.AttrTypeUpdate,
+			"password":                  diff.AttrTypeCreate,
 			"port":                      diff.AttrTypeCreate,
 			"publicly_accessible":       diff.AttrTypeCreate,
 			"username":                  diff.AttrTypeCreate,
 			"vpc_security_group_ids":    diff.AttrTypeCreate,
 			"security_group_names":      diff.AttrTypeCreate,
-			"subnet_group_name":         diff.AttrTypeCreate,
+			"db_subnet_group_name":      diff.AttrTypeCreate,
 			"skip_final_snapshot":       diff.AttrTypeUpdate,
 			"final_snapshot_identifier": diff.AttrTypeUpdate,
 		},
@@ -274,7 +269,7 @@ func resource_aws_db_instance_update_state(
 	s.Attributes["port"] = strconv.Itoa(v.Port)
 	s.Attributes["status"] = v.DBInstanceStatus
 	s.Attributes["username"] = v.MasterUsername
-	s.Attributes["subnet_group_name"] = v.DBSubnetGroup.Name
+	s.Attributes["db_subnet_group_name"] = v.DBSubnetGroup.Name
 
 	// Flatten our group values
 	toFlatten := make(map[string]interface{})
@@ -344,7 +339,7 @@ func resource_aws_db_instance_validation() *config.Validator {
 			"vpc_security_group_ids.*",
 			"skip_final_snapshot",
 			"security_group_names.*",
-			"subnet_group_name",
+			"db_subnet_group_name",
 		},
 	}
 }

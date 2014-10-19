@@ -3,6 +3,7 @@ package terraform
 import (
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,11 +36,11 @@ type Context struct {
 	variables      map[string]string
 	uiInput        UIInput
 
-	l     sync.Mutex    // Lock acquired during any task
-	parCh chan struct{} // Semaphore used to limit parallelism
-	sl    sync.RWMutex  // Lock acquired to R/W internal data
-	runCh <-chan struct{}
-	sh    *stopHook
+	parallelSem Semaphore    // Semaphore used to limit parallelism
+	l           sync.Mutex   // Lock acquired during any task
+	sl          sync.RWMutex // Lock acquired to R/W internal data
+	runCh       <-chan struct{}
+	sh          *stopHook
 }
 
 // ContextOpts are the user-creatable configuration structure to create
@@ -56,6 +57,22 @@ type ContextOpts struct {
 
 	UIInput UIInput
 }
+
+// InputMode defines what sort of input will be asked for when Input
+// is called on Context.
+type InputMode byte
+
+const (
+	// InputModeVar asks for variables
+	InputModeVar InputMode = 1 << iota
+
+	// InputModeProvider asks for provider variables
+	InputModeProvider
+
+	// InputModeStd is the standard operating mode and asks for both variables
+	// and providers.
+	InputModeStd = InputModeVar | InputModeProvider
+)
 
 // NewContext creates a new context.
 //
@@ -76,7 +93,6 @@ func NewContext(opts *ContextOpts) *Context {
 	if par == 0 {
 		par = 10
 	}
-	parCh := make(chan struct{}, par)
 
 	return &Context{
 		diff:           opts.Diff,
@@ -89,8 +105,8 @@ func NewContext(opts *ContextOpts) *Context {
 		variables:      opts.Variables,
 		uiInput:        opts.UIInput,
 
-		parCh: parCh,
-		sh:    sh,
+		parallelSem: NewSemaphore(par),
+		sh:          sh,
 	}
 }
 
@@ -136,75 +152,81 @@ func (c *Context) Graph() (*depgraph.Graph, error) {
 // Input asks for input to fill variables and provider configurations.
 // This modifies the configuration in-place, so asking for Input twice
 // may result in different UI output showing different current values.
-func (c *Context) Input() error {
+func (c *Context) Input(mode InputMode) error {
 	v := c.acquireRun()
 	defer c.releaseRun(v)
 
-	// Walk the variables first for the root module. We walk them in
-	// alphabetical order for UX reasons.
-	rootConf := c.module.Config()
-	names := make([]string, len(rootConf.Variables))
-	m := make(map[string]*config.Variable)
-	for i, v := range rootConf.Variables {
-		names[i] = v.Name
-		m[v.Name] = v
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		v := m[n]
-		switch v.Type() {
-		case config.VariableTypeMap:
-			continue
-		case config.VariableTypeString:
-			// Good!
-		default:
-			panic(fmt.Sprintf("Unknown variable type: %s", v.Type()))
+	if mode&InputModeVar != 0 {
+		// Walk the variables first for the root module. We walk them in
+		// alphabetical order for UX reasons.
+		rootConf := c.module.Config()
+		names := make([]string, len(rootConf.Variables))
+		m := make(map[string]*config.Variable)
+		for i, v := range rootConf.Variables {
+			names[i] = v.Name
+			m[v.Name] = v
 		}
-
-		var defaultString string
-		if v.Default != nil {
-			defaultString = v.Default.(string)
-		}
-
-		// Ask the user for a value for this variable
-		var value string
-		for {
-			var err error
-			value, err = c.uiInput.Input(&InputOpts{
-				Id:          fmt.Sprintf("var.%s", n),
-				Query:       fmt.Sprintf("var.%s", n),
-				Default:     defaultString,
-				Description: v.Description,
-			})
-			if err != nil {
-				return fmt.Errorf(
-					"Error asking for %s: %s", n, err)
-			}
-
-			if value == "" && v.Required() {
-				// Redo if it is required.
+		sort.Strings(names)
+		for _, n := range names {
+			v := m[n]
+			switch v.Type() {
+			case config.VariableTypeMap:
 				continue
+			case config.VariableTypeString:
+				// Good!
+			default:
+				panic(fmt.Sprintf("Unknown variable type: %s", v.Type()))
 			}
 
-			if value == "" {
-				// No value, just exit the loop. With no value, we just
-				// use whatever is currently set in variables.
+			var defaultString string
+			if v.Default != nil {
+				defaultString = v.Default.(string)
+			}
+
+			// Ask the user for a value for this variable
+			var value string
+			for {
+				var err error
+				value, err = c.uiInput.Input(&InputOpts{
+					Id:          fmt.Sprintf("var.%s", n),
+					Query:       fmt.Sprintf("var.%s", n),
+					Default:     defaultString,
+					Description: v.Description,
+				})
+				if err != nil {
+					return fmt.Errorf(
+						"Error asking for %s: %s", n, err)
+				}
+
+				if value == "" && v.Required() {
+					// Redo if it is required.
+					continue
+				}
+
+				if value == "" {
+					// No value, just exit the loop. With no value, we just
+					// use whatever is currently set in variables.
+					break
+				}
+
 				break
 			}
 
-			break
-		}
-
-		if value != "" {
-			c.variables[n] = value
+			if value != "" {
+				c.variables[n] = value
+			}
 		}
 	}
 
-	// Create the walk context and walk the inputs, which will gather the
-	// inputs for any resource providers.
-	wc := c.walkContext(walkInput, rootModulePath)
-	wc.Meta = new(walkInputMeta)
-	return wc.Walk()
+	if mode&InputModeProvider != 0 {
+		// Create the walk context and walk the inputs, which will gather the
+		// inputs for any resource providers.
+		wc := c.walkContext(walkInput, rootModulePath)
+		wc.Meta = new(walkInputMeta)
+		return wc.Walk()
+	}
+
+	return nil
 }
 
 // Plan generates an execution plan for the given context.
@@ -494,11 +516,15 @@ func (c *walkContext) Walk() error {
 	// Likewise, if we have no resources in our state, we're done. This
 	// guards against the case that we destroyed.
 	mod := c.Context.state.ModuleByPath(c.Path)
+	if mod == nil {
+		return nil
+	}
 	if c.Operation == walkApply {
 		// On Apply, we prune so that we don't do outputs if we destroyed
 		mod.prune()
 	}
 	if len(mod.Resources) == 0 {
+		mod.Outputs = nil
 		return nil
 	}
 
@@ -574,6 +600,7 @@ func (c *walkContext) inputWalkFn() depgraph.WalkFunc {
 				raw = sharedProvider.Config.RawConfig
 			}
 			rc := NewResourceConfig(raw)
+			rc.Config = make(map[string]interface{})
 
 			// Wrap the input into a namespace
 			input := &PrefixUIInput{
@@ -591,8 +618,8 @@ func (c *walkContext) inputWalkFn() depgraph.WalkFunc {
 					return fmt.Errorf(
 						"Error configuring %s: %s", k, err)
 				}
-				if newc != nil {
-					configs[k] = newc.Raw
+				if newc != nil && len(newc.Config) > 0 {
+					configs[k] = newc.Config
 				}
 			}
 
@@ -634,13 +661,12 @@ func (c *walkContext) applyWalkFn() depgraph.WalkFunc {
 				return err
 			}
 
-			// This should never happen because we check if Diff.Empty above.
-			// If this happened, then the diff above returned a bad diff.
+			// This can happen if we aren't actually applying anything
+			// except an ID (the "null" provider). It is not really an issue
+			// since the Same check later down will catch any real problems.
 			if diff == nil {
-				return fmt.Errorf(
-					"%s: diff became nil during Apply. This is a bug with "+
-						"the resource provider. Please report a bug.",
-					r.Id)
+				diff = new(InstanceDiff)
+				diff.init()
 			}
 
 			// Delete id from the diff because it is dependent on
@@ -675,7 +701,7 @@ func (c *walkContext) applyWalkFn() depgraph.WalkFunc {
 		// We create a new instance if there was no ID
 		// previously or the diff requires re-creating the
 		// underlying instance
-		createNew := is.ID == "" || diff.RequiresNew()
+		createNew := (is.ID == "" && !diff.Destroy) || diff.RequiresNew()
 
 		// With the completed diff, apply!
 		log.Printf("[DEBUG] %s: Executing Apply", r.Id)
@@ -718,18 +744,25 @@ func (c *walkContext) applyWalkFn() depgraph.WalkFunc {
 		// Additionally, we need to be careful to not run this if there
 		// was an error during the provider apply.
 		tainted := false
-		if applyerr == nil && createNew && len(r.Provisioners) > 0 {
-			for _, h := range c.Context.hooks {
-				handleHook(h.PreProvisionResource(r.Info, is))
-			}
+		if createNew && len(r.Provisioners) > 0 {
+			if applyerr == nil {
+				// If the apply succeeded, we have to run the provisioners
+				for _, h := range c.Context.hooks {
+					handleHook(h.PreProvisionResource(r.Info, is))
+				}
 
-			if err := c.applyProvisioners(r, is); err != nil {
-				errs = append(errs, err)
+				if err := c.applyProvisioners(r, is); err != nil {
+					errs = append(errs, err)
+					tainted = true
+				}
+
+				for _, h := range c.Context.hooks {
+					handleHook(h.PostProvisionResource(r.Info, is))
+				}
+			} else {
+				// If we failed to create properly and we have provisioners,
+				// then we have to mark ourselves as tainted to try again.
 				tainted = true
-			}
-
-			for _, h := range c.Context.hooks {
-				handleHook(h.PostProvisionResource(r.Info, is))
 			}
 		}
 
@@ -840,6 +873,8 @@ func (c *walkContext) planWalkFn() depgraph.WalkFunc {
 		}
 
 		if !diff.Empty() {
+			log.Printf("[DEBUG] %s: Diff: %#v", r.Id, diff)
+
 			l.Lock()
 			md := result.Diff.ModuleByPath(c.Path)
 			if md == nil {
@@ -1000,18 +1035,20 @@ func (c *walkContext) validateWalkFn() depgraph.WalkFunc {
 				// Interpolate the count and verify it is non-negative
 				rc := NewResourceConfig(rn.Config.RawCount)
 				rc.interpolate(c, rn.Resource)
-				count, err := rn.Config.Count()
-				if err == nil {
-					if count < 0 {
-						err = fmt.Errorf(
-							"%s error: count must be positive", rn.Resource.Id)
+				if !rc.IsComputed(rn.Config.RawCount.Key) {
+					count, err := rn.Config.Count()
+					if err == nil {
+						if count < 0 {
+							err = fmt.Errorf(
+								"%s error: count must be positive", rn.Resource.Id)
+						}
 					}
-				}
-				if err != nil {
-					l.Lock()
-					defer l.Unlock()
-					meta.Errs = append(meta.Errs, err)
-					return nil
+					if err != nil {
+						l.Lock()
+						defer l.Unlock()
+						meta.Errs = append(meta.Errs, err)
+						return nil
+					}
 				}
 
 				return c.genericWalkResource(rn, walkFn)
@@ -1022,10 +1059,28 @@ func (c *walkContext) validateWalkFn() depgraph.WalkFunc {
 				return nil
 			}
 
-			// Don't validate orphans since they never have a config
+			// Don't validate orphans or tainted since they never have a config
 			if rn.Resource.Flags&FlagOrphan != 0 {
 				return nil
 			}
+			if rn.Resource.Flags&FlagTainted != 0 {
+				return nil
+			}
+
+			// If the resouce name doesn't match the name regular
+			// expression, show a warning.
+			if !config.NameRegexp.Match([]byte(rn.Config.Name)) {
+				l.Lock()
+				meta.Warns = append(meta.Warns, fmt.Sprintf(
+					"%s: module name can only contain letters, numbers, "+
+						"dashes, and underscores.\n"+
+						"This will be an error in Terraform 0.4",
+					rn.Resource.Id))
+				l.Unlock()
+			}
+
+			// Compute the variables in this resource
+			rn.Resource.Config.interpolate(c, rn.Resource)
 
 			log.Printf("[INFO] Validating resource: %s", rn.Resource.Id)
 			ws, es := rn.Resource.Provider.ValidateResource(
@@ -1109,12 +1164,6 @@ func (c *walkContext) genericWalkFn(cb genericWalkFunc) depgraph.WalkFunc {
 			return nil
 		}
 
-		// Limit parallelism
-		c.Context.parCh <- struct{}{}
-		defer func() {
-			<-c.Context.parCh
-		}()
-
 		switch m := n.Meta.(type) {
 		case *GraphNodeModule:
 			// Build another walkContext for this module and walk it.
@@ -1155,9 +1204,17 @@ func (c *walkContext) genericWalkFn(cb genericWalkFunc) depgraph.WalkFunc {
 			}
 
 			for k, p := range sharedProvider.Providers {
-				// Merge the configurations to get what we use to configure with
+				// Interpolate our own configuration before merging
+				if sharedProvider.Config != nil {
+					rc := NewResourceConfig(sharedProvider.Config.RawConfig)
+					rc.interpolate(c, nil)
+				}
+
+				// Merge the configurations to get what we use to configure
+				// with. We don't need to interpolate this because the
+				// lines above verify that all parents are interpolated
+				// properly.
 				rc := sharedProvider.MergeConfig(false, cs[k])
-				rc.interpolate(c, nil)
 
 				log.Printf("[INFO] Configuring provider: %s", k)
 				err := p.Configure(rc)
@@ -1196,6 +1253,10 @@ func (c *walkContext) genericWalkFn(cb genericWalkFunc) depgraph.WalkFunc {
 			}
 		}()
 
+		// Limit parallelism
+		c.Context.parallelSem.Acquire()
+		defer c.Context.parallelSem.Release()
+
 		// Call the callack
 		log.Printf(
 			"[INFO] Module %s walking: %s (Graph node: %s)",
@@ -1219,36 +1280,29 @@ func (c *walkContext) genericWalkResource(
 	rc := NewResourceConfig(rn.Config.RawCount)
 	rc.interpolate(c, rn.Resource)
 
+	// If we're validating, then we set the count to 1 if it is computed
+	if c.Operation == walkValidate {
+		if key := rn.Config.RawCount.Key; rc.IsComputed(key) {
+			// Preserve the old value so that we reset it properly
+			old := rn.Config.RawCount.Raw[key]
+			defer func() {
+				rn.Config.RawCount.Raw[key] = old
+			}()
+
+			// Set th count to 1 for validation purposes
+			rn.Config.RawCount.Raw[key] = "1"
+		}
+	}
+
 	// Expand the node to the actual resources
-	ns, err := rn.Expand()
+	g, err := rn.Expand()
 	if err != nil {
 		return err
 	}
 
-	// Go through all the nouns and run them in parallel, collecting
-	// any errors.
-	var l sync.Mutex
-	var wg sync.WaitGroup
-	errs := make([]error, 0, len(ns))
-	for _, n := range ns {
-		wg.Add(1)
-
-		go func(n *depgraph.Noun) {
-			defer wg.Done()
-			if err := fn(n); err != nil {
-				l.Lock()
-				defer l.Unlock()
-				errs = append(errs, err)
-			}
-		}(n)
-	}
-
-	// Wait for the subgraph
-	wg.Wait()
-
-	// If there are errors, then we should return them
-	if len(errs) > 0 {
-		return &multierror.Error{Errors: errs}
+	// Walk the graph with our function
+	if err := g.Walk(fn); err != nil {
+		return err
 	}
 
 	return nil
@@ -1310,7 +1364,13 @@ func (c *walkContext) applyProvisioners(r *Resource, is *InstanceState) error {
 			handleHook(h.PreProvision(r.Info, prov.Type))
 		}
 
-		if err := prov.Provisioner.Apply(is, prov.Config); err != nil {
+		output := ProvisionerUIOutput{
+			Info:  r.Info,
+			Type:  prov.Type,
+			Hooks: c.Context.hooks,
+		}
+		err := prov.Provisioner.Apply(&output, is, prov.Config)
+		if err != nil {
 			return err
 		}
 
@@ -1426,13 +1486,41 @@ func (c *walkContext) computeVars(
 				}
 			}
 		case *config.ModuleVariable:
+			if c.Operation == walkValidate {
+				vs[n] = config.UnknownVariableValue
+				continue
+			}
+
 			value, err := c.computeModuleVariable(v)
 			if err != nil {
 				return err
 			}
 
 			vs[n] = value
+		case *config.PathVariable:
+			switch v.Type {
+			case config.PathValueCwd:
+				wd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf(
+						"Couldn't get cwd for var %s: %s",
+						v.FullKey(), err)
+				}
+
+				vs[n] = wd
+			case config.PathValueModule:
+				if t := c.Context.module.Child(c.Path[1:]); t != nil {
+					vs[n] = t.Config().Dir
+				}
+			case config.PathValueRoot:
+				vs[n] = c.Context.module.Config().Dir
+			}
 		case *config.ResourceVariable:
+			if c.Operation == walkValidate {
+				vs[n] = config.UnknownVariableValue
+				continue
+			}
+
 			var attr string
 			var err error
 			if v.Multi && v.Index == -1 {
@@ -1449,6 +1537,11 @@ func (c *walkContext) computeVars(
 			val, ok := c.Variables[v.Name]
 			if ok {
 				vs[n] = val
+				continue
+			}
+
+			if _, ok := vs[n]; !ok && c.Operation == walkValidate {
+				vs[n] = config.UnknownVariableValue
 				continue
 			}
 
@@ -1627,7 +1720,7 @@ func (c *walkContext) computeResourceMultiVariable(
 			v.FullKey())
 	}
 
-	return strings.Join(values, ","), nil
+	return strings.Join(values, config.InterpSplitDelim), nil
 }
 
 type walkInputMeta struct {

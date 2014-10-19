@@ -27,7 +27,12 @@ that is a mapping.
 **To reference attributes of other resources**, the syntax is
 `TYPE.NAME.ATTRIBUTE`. For example, `${aws_instance.web.id}`
 will interpolate the ID attribute from the "aws\_instance"
-resource named "web".
+resource named "web". If the resource has a `count` attribute set,
+you can access individual attributes with a zero-based index, such
+as `${aws_instance.web.0.id}`. You can also use the splat syntax
+to get a list of all the attributes: `${aws_instance.web.*.id}`.
+This is documented in more detail in the
+[resource configuration page](/docs/configuration/resources.html).
 
 **To reference outputs from a module**, the syntax is
 `MODULE.NAME.OUTPUT`. For example `${module.foo.bar}` will
@@ -38,6 +43,12 @@ interpolate the "bar" output from the "foo"
 For example, `${count.index}` will interpolate the current index
 in a multi-count resource. For more information on count, see the
 resource configuration page.
+
+**To reference path information**, the syntax is `path.TYPE`.
+TYPE can be `cwd`, `module`, or `root`. `cwd` will interpolate the
+cwd. `module` will interpolate the path to the current module. `root`
+will interpolate the path of the root module. In general, you probably
+want the `path.module` variable.
 
 ## Built-in Functions
 
@@ -54,6 +65,10 @@ The supported built-in functions are:
   * `file(path)` - Reads the contents of a file into the string. Variables
       in this file are _not_ interpolated. The contents of the file are
       read as-is.
+
+  * `join(delim, list)` - Joins the list with the delimiter. A list is
+      only possible with splat variables from resources with a count
+      greater than one. Example: `join(",", aws_instance.foo.*.id)`
 
   * `lookup(map, key)` - Performs a dynamic lookup into a mapping
       variable.
