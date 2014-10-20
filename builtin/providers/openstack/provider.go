@@ -44,6 +44,7 @@ func Provider() terraform.ResourceProvider {
 			"openstack_lbaas":           resourceLBaaS(),
 			"openstack_firewall":        resourceFirewall(),
 			"openstack_firewall_policy": resourceFirewallPolicy(),
+			"openstack_firewall_rule":   resourceFirewallRule(),
 		},
 
 		ConfigureFunc: providerConfigure,
