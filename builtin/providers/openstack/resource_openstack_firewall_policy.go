@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/haklop/gophercloud-extensions/network"
+	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud"
@@ -34,6 +35,14 @@ func resourceFirewallPolicy() *schema.Resource {
 				Optional: true,
 				Default:  false,
 			},
+			"rules": &schema.Schema{
+				Type:     schema.TypeSet,
+				Optional: true,
+				Elem:     &schema.Schema{Type: schema.TypeString},
+				Set: func(v interface{}) int {
+					return hashcode.String(v.(string))
+				},
+			},
 		},
 	}
 }
@@ -48,12 +57,19 @@ func resourceFirewallPolicyCreate(d *schema.ResourceData, meta interface{}) erro
 
 	access := p.AccessProvider.(*gophercloud.Access)
 
+	v := d.Get("rules").(*schema.Set)
+	rules := make([]string, v.Len())
+	for i, v := range v.List() {
+		rules[i] = v.(string)
+	}
+
 	policyConfiguration := network.NewFirewallPolicy{
 		Name:        d.Get("name").(string),
 		Description: d.Get("description").(string),
 		Audited:     d.Get("audited").(bool),
 		Shared:      d.Get("shared").(bool),
 		TenantId:    access.Token.Tenant.Id,
+		Rules:       rules,
 	}
 
 	log.Printf("[DEBUG] Create firewall policy: %#v", policyConfiguration)
