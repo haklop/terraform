@@ -2,6 +2,9 @@ package openstack
 
 import (
 	"time"
+	"crypto/sha1"
+	"encoding/hex"
+	"encoding/base64"
 
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/resource"
@@ -69,6 +72,23 @@ func resourceCompute() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
+
+			"user_data": &schema.Schema{
+				Type: schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+				// just stash the hash for state & diff comparisons
+				StateFunc: func(v interface{}) string {
+					switch v.(type) {
+					case string:
+						hash := sha1.Sum([]byte(v.(string)))
+						return hex.EncodeToString(hash[:])
+					default:
+						return ""
+					}
+				},
+
+			},
 		},
 	}
 }
@@ -92,6 +112,12 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		securityGroup[i] = map[string]interface{}{"name": v.(string)}
 	}
 
+	// API needs it to be base64 encoded.
+	userData := ""
+	if v := d.Get("user_data"); v!= nil {
+		userData = base64.StdEncoding.EncodeToString([]byte(v.(string)))
+	}
+
 	newServer, err := serversApi.CreateServer(gophercloud.NewServer{
 		Name:          d.Get("name").(string),
 		ImageRef:      d.Get("image_ref").(string),
@@ -99,6 +125,7 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		KeyPairName:   d.Get("key_pair_name").(string),
 		Networks:      networks,
 		SecurityGroup: securityGroup,
+		UserData:      userData,
 	})
 
 	if err != nil {

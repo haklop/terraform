@@ -29,6 +29,9 @@ func TestAccOpenstackCompute(t *testing.T) {
 						"openstack_compute.accept_test", "image_ref", os.Getenv("OS_AT_DEFAULT_IMAGE_REF")),
 					resource.TestCheckResourceAttr(
 						"openstack_compute.accept_test", "flavor_ref", os.Getenv("OS_AT_DEFAULT_FLAVOR_REF")),
+					resource.TestCheckResourceAttr(
+						"openstack_compute.accept_test", "user_data",
+						"c29tZSBzYW1wbGUgdXNlciBkYXRh"), // base64 encoded user_data
 				),
 			},
 		},
@@ -101,6 +104,7 @@ func testComputeConfig() string {
 	conf += "name = \"accept_test_compute\"\n"
 	conf += "image_ref = \"" + os.Getenv("OS_AT_DEFAULT_IMAGE_REF") + "\"\n"
 	conf += "flavor_ref = \"" + os.Getenv("OS_AT_DEFAULT_FLAVOR_REF") + "\"\n"
+	conf += "user_data = \"some sample user data\"\n"
 	conf += "}"
 	return conf
 }
