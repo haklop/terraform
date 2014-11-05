@@ -154,12 +154,12 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		var newIp gophercloud.FloatingIp
 		hasFloatingIps := false
 
-		floaingIps, err := serversApi.ListFloatingIps()
+		floatingIps, err := serversApi.ListFloatingIps()
 		if err != nil {
 			return err
 		}
 
-		for _, element := range floaingIps {
+		for _, element := range floatingIps {
 			// use first floating ip available on the pool
 			if element.Pool == pool && element.InstanceId == "" {
 				newIp = element
