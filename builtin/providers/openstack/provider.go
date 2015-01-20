@@ -37,14 +37,14 @@ func Provider() terraform.ResourceProvider {
 
 		ResourcesMap: map[string]*schema.Resource{
 			"openstack_network":         resourceNetwork(),
-			"openstack_subnet":          resourceSubnet(),
+			// "openstack_subnet":          resourceSubnet(),
 			"openstack_router":          resourceRouter(),
-			"openstack_security_group":  resourceSecurityGroup(),
+			// "openstack_security_group":  resourceSecurityGroup(),
 			"openstack_compute":         resourceCompute(),
-			"openstack_lbaas":           resourceLBaaS(),
-			"openstack_firewall":        resourceFirewall(),
-			"openstack_firewall_policy": resourceFirewallPolicy(),
-			"openstack_firewall_rule":   resourceFirewallRule(),
+			// "openstack_lbaas":           resourceLBaaS(),
+			// "openstack_firewall":        resourceFirewall(),
+			// "openstack_firewall_policy": resourceFirewallPolicy(),
+			// "openstack_firewall_rule":   resourceFirewallRule(),
 		},
 
 		ConfigureFunc: providerConfigure,
@@ -63,8 +63,8 @@ func envDefaultFunc(k string) schema.SchemaDefaultFunc {
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	config := Config{
-		Auth:     d.Get("auth_url").(string),
-		User:     d.Get("username").(string),
+		AuthUrl:  d.Get("auth_url").(string),
+		Username: d.Get("username").(string),
 		Password: d.Get("password").(string),
 		TenantId: d.Get("tenant_id").(string),
 	}
