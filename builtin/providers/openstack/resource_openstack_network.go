@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud/openstack/networking/v2/networks"
 )
 
@@ -19,6 +20,16 @@ func resourceNetwork() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 			},
+			"admin_state_up": &schema.Schema{
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  true,
+			},
+			"shared": &schema.Schema{
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
 		},
 	}
 }
@@ -31,9 +42,13 @@ func resourceNetworkCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
+	adminStateUp := d.Get("admin_state_up").(bool)
+	shared := d.Get("shared").(bool)
+
 	opts := networks.CreateOpts{
 		Name:         d.Get("name").(string),
-		AdminStateUp: networks.Up,
+		AdminStateUp: &adminStateUp,
+		Shared:       &shared,
 	}
 
 	log.Printf("[DEBUG] Create network: %#v", opts)
@@ -72,33 +87,28 @@ func resourceNetworkRead(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	network, err := networks.Get(networkClient, "id").Extract()
+	network, err := networks.Get(networkClient, d.Id()).Extract()
 	if err != nil {
+		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+		if !ok {
+			return err
+		}
+
+		if httpError.Actual == 404 {
+			d.SetId("")
+			return nil
+		}
+
 		return err
 	}
-	// TODO Handle 404 as before
-	// n, err := networksApi.GetNetwork(d.Id())
-	// if err != nil {
-	// 	httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
-	// 	if !ok {
-	// 		return err
-	// 	}
-	//
-	// 	if httpError.Actual == 404 {
-	// 		d.SetId("")
-	// 		return nil
-	// 	}
-	//
-	// 	return err
-	// }
 
 	d.Set("name", network.Name)
+	d.Set("shared", network.Shared)
+	d.Set("admin_state_up", network.AdminStateUp)
 	return nil
 }
 
 func resourceNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
-
-	d.Partial(true)
 
 	c := meta.(*Config)
 	networkClient, err := c.getNetworkClient()
@@ -106,18 +116,19 @@ func resourceNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
+	if d.HasChange("name") || d.HasChange("shared") || d.HasChange("admin_state_up") {
 
-	if d.HasChange("name") {
-		opts := networks.UpdateOpts{Name: d.Get("name").(string)}
-		_, err := networks.Update(networkClient, d.Id(), opts).Extract()
-		if err != nil {
-			return err
+		adminStateUp := d.Get("admin_state_up").(bool)
+		shared := d.Get("shared").(bool)
+
+		opts := networks.UpdateOpts{
+			Name:         d.Get("name").(string),
+			AdminStateUp: &adminStateUp,
+			Shared:       &shared,
 		}
-
-		d.SetPartial("name")
+		_, err := networks.Update(networkClient, d.Id(), opts).Extract()
+		return err
 	}
-
-	d.Partial(false)
 
 	return nil
 }
