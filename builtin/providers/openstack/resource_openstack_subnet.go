@@ -1,6 +1,7 @@
 package openstack
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/hashicorp/terraform/helper/schema"
@@ -40,6 +41,30 @@ func resourceSubnet() *schema.Resource {
 				Optional: true,
 				Default:  true,
 			},
+			"gateway_ip": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
+			},
+			"allocation_pool": &schema.Schema{
+				Type:     schema.TypeList,
+				Optional: true,
+				ForceNew: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"start": &schema.Schema{
+							Type:     schema.TypeString,
+							Required: true,
+							ForceNew: true,
+						},
+						"end": &schema.Schema{
+							Type:     schema.TypeString,
+							Required: true,
+							ForceNew: true,
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -61,6 +86,27 @@ func resourceSubnetCreate(d *schema.ResourceData, meta interface{}) error {
 		IPVersion:  d.Get("ip_version").(int),
 	}
 
+	gatewayIP := d.Get("gateway_ip").(string)
+	if len(gatewayIP) > 0 {
+		opts.GatewayIP = gatewayIP
+	}
+
+	poolsCount := d.Get("allocation_pool.#").(int)
+	if poolsCount > 0 {
+		pools := make([]subnets.AllocationPool, 0, poolsCount)
+		for i := 0; i < poolsCount; i++ {
+			prefix := fmt.Sprintf("allocation_pool.%d", i)
+
+			var pool subnets.AllocationPool
+			pool.Start = d.Get(prefix + ".start").(string)
+			pool.End = d.Get(prefix + ".end").(string)
+
+			pools = append(pools, pool)
+		}
+
+		opts.AllocationPools = pools
+	}
+
 	log.Printf("[DEBUG] Creating subnet: %#v", opts)
 
 	createdSubnet, err := subnets.Create(client, opts).Extract()
@@ -69,6 +115,7 @@ func resourceSubnetCreate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	d.SetId(createdSubnet.ID)
+	readSubnet(createdSubnet, d)
 
 	return nil
 }
@@ -110,11 +157,7 @@ func resourceSubnetRead(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	d.Set("name", subnet.Name)
-	d.Set("cidr", subnet.CIDR)
-	d.Set("enable_dhcp", subnet.EnableDHCP)
-	d.Set("ip_version", subnet.IPVersion)
-	d.Set("network_id", subnet.NetworkID)
+	readSubnet(subnet, d)
 
 	return nil
 }
@@ -137,8 +180,28 @@ func resourceSubnetUpdate(d *schema.ResourceData, meta interface{}) error {
 		opts.EnableDHCP = &enableDHCP
 	}
 
+	if d.HasChange("gateway_ip") {
+		opts.GatewayIP = d.Get("gateway_ip").(string)
+	}
+
 	log.Printf("[DEBUG] Updating subnet: %#v", opts)
 
 	_, err = subnets.Update(client, d.Id(), opts).Extract()
 	return err
+}
+
+func readSubnet(subnet *subnets.Subnet, d *schema.ResourceData) {
+	d.Set("name", subnet.Name)
+	d.Set("cidr", subnet.CIDR)
+	d.Set("enable_dhcp", subnet.EnableDHCP)
+	d.Set("ip_version", subnet.IPVersion)
+	d.Set("network_id", subnet.NetworkID)
+	d.Set("gateway_ip", subnet.GatewayIP)
+
+	d.Set("allocation_pool.#", len(subnet.AllocationPools))
+	for i, pool := range subnet.AllocationPools {
+		prefix := fmt.Sprintf("allocation_pool.%d", i)
+		d.Set(prefix+".start", pool.Start)
+		d.Set(prefix+".end", pool.End)
+	}
 }

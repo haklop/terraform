@@ -143,5 +143,9 @@ resource "openstack_subnet" "subnet_test" {
 	cidr = "10.20.20.0/24"
 	ip_version = 4
 	network_id = "${openstack_network.accept_test.id}"
+	allocation_pool = {
+        start = "10.20.20.200"
+        end = "10.20.20.250"
+    }
 }
 `
