@@ -116,19 +116,24 @@ func resourceNetworkUpdate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	if d.HasChange("name") || d.HasChange("shared") || d.HasChange("admin_state_up") {
+	opts := networks.UpdateOpts{}
 
-		adminStateUp := d.Get("admin_state_up").(bool)
-		shared := d.Get("shared").(bool)
-
-		opts := networks.UpdateOpts{
-			Name:         d.Get("name").(string),
-			AdminStateUp: &adminStateUp,
-			Shared:       &shared,
-		}
-		_, err := networks.Update(networkClient, d.Id(), opts).Extract()
-		return err
+	if d.HasChange("name") {
+		opts.Name = d.Get("name").(string)
 	}
 
-	return nil
+	if d.HasChange("shared") {
+		shared := d.Get("shared").(bool)
+		opts.Shared = &shared
+	}
+
+	if d.HasChange("admin_state_up") {
+		adminStateUp := d.Get("admin_state_up").(bool)
+		opts.AdminStateUp = &adminStateUp
+	}
+
+	log.Printf("[DEBUG] Updating network: %#v", opts)
+
+	_, err = networks.Update(networkClient, d.Id(), opts).Extract()
+	return err
 }
