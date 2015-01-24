@@ -22,7 +22,14 @@ func TestAccOpenstackNetwork(t *testing.T) {
 				Config: testNetworkConfig,
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckOpenstackNetworkExists(
-						"openstack_network.accept_test", &networkId),
+						"openstack_network.accept_test", "accept_test_network", &networkId),
+				),
+			},
+			resource.TestStep{
+				Config: testNetworkUpdateConfig,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckOpenstackNetworkExists(
+						"openstack_network.accept_test", "accept_test_network_update", &networkId),
 				),
 			},
 		},
@@ -56,7 +63,7 @@ func testAccCheckOpenstackNetworkDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testAccCheckOpenstackNetworkExists(n string, networkId *string) resource.TestCheckFunc {
+func testAccCheckOpenstackNetworkExists(n string, networkName string, networkId *string) resource.TestCheckFunc {
 
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
@@ -83,6 +90,10 @@ func testAccCheckOpenstackNetworkExists(n string, networkId *string) resource.Te
 			return fmt.Errorf("Network not found")
 		}
 
+		if found.Name != networkName {
+			return fmt.Errorf("Wrong network name %s expected %s", found.Name, networkName)
+		}
+
 		networkId = &found.ID
 
 		return nil
@@ -91,6 +102,12 @@ func testAccCheckOpenstackNetworkExists(n string, networkId *string) resource.Te
 
 const testNetworkConfig = `
 resource "openstack_network" "accept_test" {
-    name = "accept_test Network"
+    name = "accept_test_network"
+}
+`
+
+const testNetworkUpdateConfig = `
+resource "openstack_network" "accept_test" {
+    name = "accept_test_network_update"
 }
 `
