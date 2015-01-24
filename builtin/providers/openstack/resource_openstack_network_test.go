@@ -4,15 +4,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud"
+	"github.com/rackspace/gophercloud/openstack/networking/v2/networks"
 )
 
 func TestAccOpenstackNetwork(t *testing.T) {
-	var network network.Network
+	var networkId string
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -23,7 +22,7 @@ func TestAccOpenstackNetwork(t *testing.T) {
 				Config: testNetworkConfig,
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckOpenstackNetworkExists(
-						"openstack_network.accept_test", &network),
+						"openstack_network.accept_test", &networkId),
 				),
 			},
 		},
@@ -38,25 +37,18 @@ func testAccCheckOpenstackNetworkDestroy(s *terraform.State) error {
 			continue
 		}
 
-		networksApi, err := network.NetworksApi(config.AccessProvider, gophercloud.ApiCriteria{
-			Name:      "neutron",
-			UrlChoice: gophercloud.PublicURL,
-		})
+		networkClient, err := config.getNetworkClient()
 		if err != nil {
 			return err
 		}
 
-		_, err = networksApi.GetNetwork(rs.Primary.ID)
+		_, err = networks.Get(networkClient, rs.Primary.ID).Extract()
 		if err == nil {
 			return fmt.Errorf("Network (%s) still exists.", rs.Primary.ID)
 		}
 
 		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
-		if !ok {
-			return fmt.Errorf("Unkonw Security Group error")
-		}
-
-		if httpError.Actual != 404 {
+		if !ok || httpError.Actual != 404 {
 			return httpError
 		}
 	}
@@ -64,7 +56,7 @@ func testAccCheckOpenstackNetworkDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testAccCheckOpenstackNetworkExists(n string, net *network.Network) resource.TestCheckFunc {
+func testAccCheckOpenstackNetworkExists(n string, networkId *string) resource.TestCheckFunc {
 
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
@@ -77,22 +69,21 @@ func testAccCheckOpenstackNetworkExists(n string, net *network.Network) resource
 		}
 
 		config := testAccProvider.Meta().(*Config)
-
-		networksApi, err := network.NetworksApi(config.AccessProvider, gophercloud.ApiCriteria{
-			Name:      "neutron",
-			UrlChoice: gophercloud.PublicURL,
-		})
+		networkClient, err := config.getNetworkClient()
 		if err != nil {
 			return err
 		}
 
-		found, err := networksApi.GetNetwork(rs.Primary.ID)
+		found, err := networks.Get(networkClient, rs.Primary.ID).Extract()
+		if err != nil {
+			return err
+		}
 
-		if found.Id != rs.Primary.ID {
+		if found.ID != rs.Primary.ID {
 			return fmt.Errorf("Network not found")
 		}
 
-		*net = *found
+		networkId = &found.ID
 
 		return nil
 	}
