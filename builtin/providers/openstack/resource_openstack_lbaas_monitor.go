@@ -200,3 +200,11 @@ func readMonitor(monitor *monitors.Monitor, d *schema.ResourceData) {
 	}
 
 }
+
+func flattenMonitor(list []monitors.Monitor) []string {
+	result := make([]string, 0, len(list))
+	for _, i := range list {
+		result = append(result, i.ID)
+	}
+	return result
+}
