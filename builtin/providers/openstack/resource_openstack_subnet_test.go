@@ -47,7 +47,7 @@ func testAccCheckOpenstackSubnetDestroy(s *terraform.State) error {
 	config := testAccProvider.Meta().(*Config)
 
 	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "openstack_network" {
+		if rs.Type != "openstack_subnet" {
 			continue
 		}
 
