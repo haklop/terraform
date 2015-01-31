@@ -1,13 +1,20 @@
 package openstack
 
 import (
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/rackspace/gophercloud"
+	"github.com/rackspace/gophercloud/openstack/compute/v2/extensions/keypairs"
 	"github.com/rackspace/gophercloud/openstack/compute/v2/servers"
+	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/layer3/floatingips"
+	"github.com/rackspace/gophercloud/openstack/networking/v2/networks"
+	"github.com/rackspace/gophercloud/openstack/networking/v2/ports"
+	"github.com/rackspace/gophercloud/pagination"
 )
 
 func resourceCompute() *schema.Resource {
@@ -80,6 +87,7 @@ func resourceCompute() *schema.Resource {
 			"floating_ip": &schema.Schema{
 				Type:     schema.TypeString,
 				Computed: true,
+				Optional: true,
 			},
 
 			// "user_data": &schema.Schema{
@@ -108,12 +116,6 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	// v := d.Get("networks").(*schema.Set)
-	// networks := make([]gophercloud.NetworkConfig, v.Len())
-	// for i, v := range v.List() {
-	// 	networks[i] = gophercloud.NetworkConfig{v.(string)}
-	// }
-
 	v := d.Get("security_groups").(*schema.Set)
 	securityGroups := make([]string, v.Len())
 	for _, v := range v.List() {
@@ -124,22 +126,25 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 	networks := []servers.Network{}
 	for _, v := range v.List() {
 		if len(v.(string)) > 0 {
-			networks = append(networks, servers.Network {
+			networks = append(networks, servers.Network{
 				UUID: v.(string),
 			})
 		}
 	}
 
-	opts := servers.CreateOpts {
-		Name: d.Get("name").(string),
-		ImageRef: d.Get("image_ref").(string),
-		FlavorRef: d.Get("flavor_ref").(string),
-		SecurityGroups: securityGroups,
+	opts := servers.CreateOpts{
+		Name:             d.Get("name").(string),
+		ImageRef:         d.Get("image_ref").(string),
+		FlavorRef:        d.Get("flavor_ref").(string),
+		SecurityGroups:   securityGroups,
 		AvailabilityZone: d.Get("availabilty_zone").(string),
-		Networks: networks,
+		Networks:         networks,
 	}
 
-	instance, err := servers.Create(computeClient, opts).Extract()
+	instance, err := servers.Create(computeClient, keypairs.CreateOptsExt{
+		opts,
+		d.Get("key_pair_name").(string),
+	}).Extract()
 	if err != nil {
 		return err
 	}
@@ -161,47 +166,214 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	// pool := d.Get("floating_ip_pool").(string)
-	// if len(pool) > 0 {
-	// 	var newIp gophercloud.FloatingIp
-	// 	hasFloatingIps := false
-	//
-	// 	floatingIps, err := serversApi.ListFloatingIps()
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	//
-	// 	for _, element := range floatingIps {
-	// 		// use first floating ip available on the pool
-	// 		if element.Pool == pool && element.InstanceId == "" {
-	// 			newIp = element
-	// 			hasFloatingIps = true
-	// 		}
-	// 	}
-	//
-	// 	// if there is no available floating ips, try to create a new one
-	// 	if !hasFloatingIps {
-	// 		newIp, err = serversApi.CreateFloatingIp(pool)
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 	}
-	//
-	// 	err = serversApi.AssociateFloatingIp(newServer.Id, newIp)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	//
-	// 	d.Set("floating_ip", newIp.Ip)
-	//
-	// 	// Initialize the connection info
-	// 	d.SetConnInfo(map[string]string{
-	// 		"type": "ssh",
-	// 		"host": newIp.Ip,
-	// 	})
-	// }
+	floatingip := d.Get("floating_ip").(string)
+	pool := d.Get("floating_ip_pool").(string)
+	log.Printf("[DEBUG] 0. Looking for an IP in the pool %s\n", pool)
+	allFloatingIPs, err := getFloatingIPs(c)
+	if err != nil {
+		return err
+	}
+	if len(floatingip) > 0 {
+		err = assignFloatingIP(c, extractFloatingIPFromIP(allFloatingIPs, floatingip), instance.ID)
+		if err != nil {
+			return err
+		}
+	} else if len(pool) > 0 {
+		log.Printf("[DEBUG] Looking for an IP in the pool %s\n", pool)
+		networkClient, err := c.getNetworkClient()
+		if err != nil {
+			return err
+		}
+		poolID, err := getNetworkID(c, pool)
+		if err != nil {
+			return err
+		}
+		opts := floatingips.ListOpts{
+			FloatingNetworkID: poolID,
+		}
+		pager := floatingips.List(networkClient, opts)
+		ipAssigned := false
+		err = pager.EachPage(func(page pagination.Page) (bool, error) {
+			floatingIPList, err := floatingips.ExtractFloatingIPs(page)
+			if err != nil {
+				return false, err
+			}
+
+			for _, f := range floatingIPList {
+				if f.FloatingNetworkID == poolID && len(f.PortID) == 0 {
+					floatingip = f.FloatingIP
+					err = assignFloatingIP(c, &f, instance.ID)
+					if err != nil {
+						return false, err
+					}
+					ipAssigned = true
+					return false, nil
+				}
+			}
+			return true, nil
+		})
+
+		if !ipAssigned {
+			//TODO try to allocate a new one
+			//TODO Assign FloatingIP
+		}
+	}
+
+	d.Set("floating_ip", floatingip)
+
+	// Initialize the connection info
+	d.SetConnInfo(map[string]string{
+		"type": "ssh",
+		"host": floatingip,
+	})
 
 	return nil
+}
+
+func extractFloatingIPFromIP(ips []floatingips.FloatingIP, IP string) *floatingips.FloatingIP {
+	for _, floatingIP := range ips {
+		if floatingIP.FloatingIP == IP {
+			return &floatingIP
+		}
+	}
+	return nil
+}
+
+func getFloatingIPs(c *Config) ([]floatingips.FloatingIP, error) {
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return nil, err
+	}
+	pager := floatingips.List(networkClient, floatingips.ListOpts{})
+
+	ips := []floatingips.FloatingIP{}
+	err = pager.EachPage(func(page pagination.Page) (bool, error) {
+		floatingipList, err := floatingips.ExtractFloatingIPs(page)
+		if err != nil {
+			return false, err
+		}
+		for _, f := range floatingipList {
+			ips = append(ips, f)
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return ips, nil
+}
+
+func assignFloatingIP(c *Config, floatingIP *floatingips.FloatingIP, instanceID string) error {
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return err
+	}
+	networkID, err := getFirstNetworkID(c, instanceID)
+	if err != nil {
+		return err
+	}
+	portID, err := getInstancePortID(c, instanceID, networkID)
+	_, err = floatingips.Update(networkClient, floatingIP.ID, floatingips.UpdateOpts{
+		PortID: portID,
+	}).Extract()
+	return err
+}
+
+func allocateAndAssignFloatingIP(c *Config, floatingNetworkID, portID string) (*floatingips.FloatingIP, error) {
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return nil, err
+	}
+	return floatingips.Create(networkClient, floatingips.CreateOpts{
+		FloatingNetworkID: floatingNetworkID,
+		PortID:            portID,
+	}).Extract()
+}
+
+func getInstancePortID(c *Config, instanceID, networkID string) (string, error) {
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return "", err
+	}
+	pager := ports.List(networkClient, ports.ListOpts{
+		DeviceID:  instanceID,
+		NetworkID: networkID,
+	})
+
+	var portID string
+	err = pager.EachPage(func(page pagination.Page) (bool, error) {
+		portList, err := ports.ExtractPorts(page)
+		if err != nil {
+			return false, err
+		}
+		for _, port := range portList {
+			portID = port.ID
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+	return portID, nil
+}
+
+func getFirstNetworkID(c *Config, instanceID string) (string, error) {
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return "", err
+	}
+	pager := networks.List(networkClient, networks.ListOpts{})
+
+	var networkdID string
+	err = pager.EachPage(func(page pagination.Page) (bool, error) {
+		networkList, err := networks.ExtractNetworks(page)
+		if err != nil {
+			return false, err
+		}
+
+		if len(networkList) > 0 {
+			networkdID = networkList[0].ID
+			return false, nil
+		}
+		return false, fmt.Errorf("No network found for the instance %s", instanceID)
+	})
+	if err != nil {
+		return "", err
+	}
+	return networkdID, nil
+
+}
+
+func getNetworkID(c *Config, networkName string) (string, error) {
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return "", err
+	}
+
+	opts := networks.ListOpts{Name: networkName}
+	pager := networks.List(networkClient, opts)
+	networkID := ""
+
+	err = pager.EachPage(func(page pagination.Page) (bool, error) {
+		networkList, err := networks.ExtractNetworks(page)
+		if err != nil {
+			return false, err
+		}
+
+		for _, n := range networkList {
+			if n.Name == networkName {
+				networkID = n.ID
+				return false, nil
+			}
+		}
+
+		return true, nil
+	})
+
+	return networkID, err
 }
 
 func resourceComputeDelete(d *schema.ResourceData, meta interface{}) error {
@@ -240,7 +412,7 @@ func resourceComputeUpdate(d *schema.ResourceData, meta interface{}) error {
 	d.Partial(true)
 
 	if d.HasChange("name") {
-		opts:= servers.UpdateOpts {
+		opts := servers.UpdateOpts{
 			Name: d.Get("name").(string),
 		}
 		_, err := servers.Update(computeClient, d.Id(), opts).Extract()
@@ -252,7 +424,7 @@ func resourceComputeUpdate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	if d.HasChange("flavor_ref") {
-		opts := servers.ResizeOpts {
+		opts := servers.ResizeOpts{
 			FlavorRef: d.Get("flavor_ref").(string),
 		}
 		res := servers.Resize(computeClient, d.Id(), opts)
