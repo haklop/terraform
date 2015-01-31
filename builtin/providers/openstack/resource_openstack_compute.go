@@ -214,8 +214,12 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		})
 
 		if !ipAssigned {
-			//TODO try to allocate a new one
-			//TODO Assign FloatingIP
+			allocatedIP, err := allocateAndAssignFloatingIP(c, poolID, instance.ID)
+			if err != nil {
+				return err
+			}
+			ipAssigned = true
+			floatingip = allocatedIP.FloatingIP
 		}
 	}
 
@@ -280,11 +284,17 @@ func assignFloatingIP(c *Config, floatingIP *floatingips.FloatingIP, instanceID 
 	return err
 }
 
-func allocateAndAssignFloatingIP(c *Config, floatingNetworkID, portID string) (*floatingips.FloatingIP, error) {
+func allocateAndAssignFloatingIP(c *Config, floatingNetworkID, instanceID string) (*floatingips.FloatingIP, error) {
 	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return nil, err
 	}
+	networkID, err := getFirstNetworkID(c, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	portID, err := getInstancePortID(c, instanceID, networkID)
+
 	return floatingips.Create(networkClient, floatingips.CreateOpts{
 		FloatingNetworkID: floatingNetworkID,
 		PortID:            portID,
