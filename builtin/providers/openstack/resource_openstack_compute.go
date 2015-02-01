@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud"
 	"github.com/rackspace/gophercloud/openstack/compute/v2/extensions/keypairs"
 	"github.com/rackspace/gophercloud/openstack/compute/v2/servers"
@@ -25,7 +26,6 @@ func resourceCompute() *schema.Resource {
 		Delete: resourceComputeDelete,
 
 		//TODO Handle UserData
-		//TODO Handle Networks
 		//TODO Handle Metadata
 		//TODO Handle Personnality
 		//TODO Handle ConfigDrive
@@ -40,7 +40,7 @@ func resourceCompute() *schema.Resource {
 			"key_pair_name": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				ForceNew: true, // TODO handle update
+				ForceNew: true,
 			},
 
 			"flavor_ref": &schema.Schema{
@@ -53,7 +53,7 @@ func resourceCompute() *schema.Resource {
 				Required: true,
 			},
 
-			"availabilty_zone": &schema.Schema{
+			"availability_zone": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
@@ -137,7 +137,7 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		ImageRef:         d.Get("image_ref").(string),
 		FlavorRef:        d.Get("flavor_ref").(string),
 		SecurityGroups:   securityGroups,
-		AvailabilityZone: d.Get("availabilty_zone").(string),
+		AvailabilityZone: d.Get("availability_zone").(string),
 		Networks:         networks,
 	}
 
@@ -478,20 +478,17 @@ func resourceComputeRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	server, err := servers.Get(computeClient, d.Id()).Extract()
-	// TODO Handle error and not found
-	// if err != nil {
-	// 	httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
-	// 	if !ok {
-	// 		return err
-	// 	}
-	//
-	// 	if httpError.Actual == 404 {
-	// 		d.SetId("")
-	// 		return nil
-	// 	}
-	//
-	// 	return err
-	// }
+	if err != nil {
+		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+		if !ok {
+			return err
+		}
+		if httpError.Actual == 404 {
+			d.SetId("")
+			return nil
+		}
+		return err
+	}
 
 	// TODO check networks, seucrity groups and floating ip
 
@@ -505,24 +502,18 @@ func WaitForServerState(client *gophercloud.ServiceClient, id string) resource.S
 
 	return func() (interface{}, string, error) {
 		s, err := servers.Get(client, id).Extract()
-		//TODO Handle err and 404
+
 		if err != nil {
+			httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+			if !ok {
+				return nil, "", err
+			}
+
+			if httpError.Actual == 404 {
+				return s, "DELETED", nil
+			}
 			return nil, "", err
 		}
-		// if err != nil {
-		// 	httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
-		// 	if !ok {
-		// 		return nil, "", err
-		// 	}
-		//
-		// 	if httpError.Actual == 404 {
-		// 		return s, "DELETED", nil
-		// 	}
-		//
-		// 	return nil, "", err
-		// }
-
 		return s, s.Status, nil
-
 	}
 }
