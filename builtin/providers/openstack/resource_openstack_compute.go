@@ -1,6 +1,8 @@
 package openstack
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
@@ -25,7 +27,6 @@ func resourceCompute() *schema.Resource {
 		Update: resourceComputeUpdate,
 		Delete: resourceComputeDelete,
 
-		//TODO Handle UserData
 		//TODO Handle Metadata
 		//TODO Handle Personnality
 		//TODO Handle ConfigDrive
@@ -90,21 +91,21 @@ func resourceCompute() *schema.Resource {
 				Optional: true,
 			},
 
-			// "user_data": &schema.Schema{
-			// 	Type:     schema.TypeString,
-			// 	Optional: true,
-			// 	ForceNew: true,
-			// 	// just stash the hash for state & diff comparisons
-			// 	StateFunc: func(v interface{}) string {
-			// 		switch v.(type) {
-			// 		case string:
-			// 			hash := sha1.Sum([]byte(v.(string)))
-			// 			return hex.EncodeToString(hash[:])
-			// 		default:
-			// 			return ""
-			// 		}
-			// 	},
-			// },
+			"user_data": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+				// just stash the hash for state & diff comparisons
+				StateFunc: func(v interface{}) string {
+					switch v.(type) {
+					case string:
+						hash := sha1.Sum([]byte(v.(string)))
+						return hex.EncodeToString(hash[:])
+					default:
+						return ""
+					}
+				},
+			},
 		},
 	}
 }
@@ -139,6 +140,7 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 		SecurityGroups:   securityGroups,
 		AvailabilityZone: d.Get("availability_zone").(string),
 		Networks:         networks,
+		UserData:         []byte(d.Get("user_data").(string)),
 	}
 
 	instance, err := servers.Create(computeClient, keypairs.CreateOptsExt{
