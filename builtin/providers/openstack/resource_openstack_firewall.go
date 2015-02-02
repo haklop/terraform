@@ -6,11 +6,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
 	"github.com/rackspace/gophercloud"
+	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/fwaas/firewalls"
 )
 
 func resourceFirewall() *schema.Resource {
@@ -48,26 +48,23 @@ func resourceFirewall() *schema.Resource {
 
 func resourceFirewallCreate(d *schema.ResourceData, meta interface{}) error {
 
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return err
 	}
 
-	access := p.AccessProvider.(*gophercloud.Access)
-
-	firewallConfiguration := network.NewFirewall{
+	firewallConfiguration := firewalls.CreateOpts{
 		Name:         d.Get("name").(string),
 		Description:  d.Get("description").(string),
 		PolicyId:     d.Get("policy_id").(string),
 		AdminStateUp: d.Get("admin_state_up").(bool),
 		Shared:       d.Get("shared").(bool),
-		TenantId:     access.Token.Tenant.Id,
 	}
 
 	log.Printf("[DEBUG] Create firewall: %#v", firewallConfiguration)
 
-	firewall, err := networksApi.CreateFirewall(firewallConfiguration)
+	firewall, err := firewalls.Create(networkClient, firewallConfiguration).Extract()
 	if err != nil {
 		return err
 	}
@@ -80,13 +77,13 @@ func resourceFirewallCreate(d *schema.ResourceData, meta interface{}) error {
 func resourceFirewallRead(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[DEBUG] Retrieve information about firewall: %s", d.Id())
 
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return err
 	}
 
-	n, err := networksApi.GetFirewall(d.Id())
+	firewall, err := firewalls.Get(networkClient, d.Id()).Extract()
 	if err != nil {
 		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
 		if !ok {
@@ -97,24 +94,23 @@ func resourceFirewallRead(d *schema.ResourceData, meta interface{}) error {
 			d.SetId("")
 			return nil
 		}
-
 		return err
 	}
 
-	d.Set("name", n.Name)
+	d.Set("name", firewall.Name)
 	return nil
 }
 
 func resourceFirewallDelete(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[DEBUG] Destroy firewall: %s", d.Id())
 
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return err
 	}
 
-	err = networksApi.DeleteFirewall(d.Id())
+	err = firewalls.Delete(networkClient, d.Id()).Err
 
 	if err != nil {
 		return err
@@ -123,7 +119,7 @@ func resourceFirewallDelete(d *schema.ResourceData, meta interface{}) error {
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"DELETING"},
 		Target:     "DELETED",
-		Refresh:    WaitForFirewallDeletion(networksApi, d.Id()),
+		Refresh:    WaitForFirewallDeletion(networkClient, d.Id()),
 		Timeout:    2 * time.Minute,
 		Delay:      0,
 		MinTimeout: 2 * time.Second,
@@ -134,10 +130,10 @@ func resourceFirewallDelete(d *schema.ResourceData, meta interface{}) error {
 	return err
 }
 
-func WaitForFirewallDeletion(api network.NetworkProvider, id string) resource.StateRefreshFunc {
+func WaitForFirewallDeletion(networkClient *gophercloud.ServiceClient, id string) resource.StateRefreshFunc {
 
 	return func() (interface{}, string, error) {
-		fw, err := api.GetFirewall(id)
+		fw, err := firewalls.Get(networkClient, id).Extract()
 		log.Printf("[DEBUG] Get firewall %s => %#v", id, fw)
 
 		if err != nil {
@@ -148,7 +144,6 @@ func WaitForFirewallDeletion(api network.NetworkProvider, id string) resource.St
 				log.Printf("[DEBUG] Firewall %s is actually deleted", id)
 				return "", "DELETED", nil
 			}
-
 			return nil, "", errors.New(fmt.Sprintf("Unexpected status code %d", httpStatus.Actual))
 		}
 
