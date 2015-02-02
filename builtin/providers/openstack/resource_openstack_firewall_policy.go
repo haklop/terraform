@@ -2,12 +2,12 @@ package openstack
 
 import (
 	"log"
+	"time"
 
-	"github.com/haklop/gophercloud-extensions/network"
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud"
+	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/fwaas/policies"
 )
 
 func resourceFirewallPolicy() *schema.Resource {
@@ -49,37 +49,40 @@ func resourceFirewallPolicy() *schema.Resource {
 
 func resourceFirewallPolicyCreate(d *schema.ResourceData, meta interface{}) error {
 
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	time.Sleep(time.Second * 5)
+
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return err
 	}
 
-	access := p.AccessProvider.(*gophercloud.Access)
-
 	v := d.Get("rules").(*schema.Set)
+
+	log.Printf("[DEBUG] Rules found : %#v", v)
+	log.Printf("[DEBUG] Rules count : %i", v.Len())
+
 	rules := make([]string, v.Len())
 	for i, v := range v.List() {
 		rules[i] = v.(string)
 	}
 
-	policyConfiguration := network.NewFirewallPolicy{
+	opts := policies.CreateOpts{
 		Name:        d.Get("name").(string),
 		Description: d.Get("description").(string),
-		Audited:     d.Get("audited").(bool),
-		Shared:      d.Get("shared").(bool),
-		TenantId:    access.Token.Tenant.Id,
-		Rules:       rules,
+		//		Audited:     d.Get("audited").(bool),
+		//		Shared:      d.Get("shared").(bool),
+		Rules: rules,
 	}
 
-	log.Printf("[DEBUG] Create firewall policy: %#v", policyConfiguration)
+	log.Printf("[DEBUG] Create firewall policy: %#v", opts)
 
-	firewall, err := networksApi.CreateFirewallPolicy(policyConfiguration)
+	policy, err := policies.Create(networkClient, opts).Extract()
 	if err != nil {
 		return err
 	}
 
-	d.SetId(firewall.Id)
+	d.SetId(policy.Id)
 
 	return nil
 }
@@ -87,28 +90,27 @@ func resourceFirewallPolicyCreate(d *schema.ResourceData, meta interface{}) erro
 func resourceFirewallPolicyRead(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[DEBUG] Retrieve information about firewall policy: %s", d.Id())
 
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return err
 	}
 
-	n, err := networksApi.GetFirewallPolicy(d.Id())
+	policy, err := policies.Get(networkClient, d.Id()).Extract()
+
 	if err != nil {
 		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
 		if !ok {
 			return err
 		}
-
 		if httpError.Actual == 404 {
 			d.SetId("")
 			return nil
 		}
-
 		return err
 	}
 
-	d.Set("name", n.Name)
+	d.Set("name", policy.Name)
 
 	return nil
 }
@@ -116,11 +118,10 @@ func resourceFirewallPolicyRead(d *schema.ResourceData, meta interface{}) error 
 func resourceFirewallPolicyDelete(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[DEBUG] Destroy firewall policy: %s", d.Id())
 
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
 	if err != nil {
 		return err
 	}
-
-	return networksApi.DeleteFirewallPolicy(d.Id())
+	return policies.Delete(networkClient, d.Id()).Err
 }
