@@ -3,7 +3,7 @@ package openstack
 import (
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/lbaas/monitors"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/lbaas/monitors"
 )
 
 func resourceLBaaSMonitor() *schema.Resource {

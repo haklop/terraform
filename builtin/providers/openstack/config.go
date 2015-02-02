@@ -4,8 +4,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/rackspace/gophercloud"
-	"github.com/rackspace/gophercloud/openstack"
+	"github.com/ggiamarchi/gophercloud"
+	"github.com/ggiamarchi/gophercloud/openstack"
 )
 
 type Config struct {

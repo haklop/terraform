@@ -6,7 +6,7 @@ import (
 
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/subnets"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/subnets"
 )
 
 func resourceSubnet() *schema.Resource {

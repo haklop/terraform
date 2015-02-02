@@ -4,9 +4,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/rules"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/fwaas/rules"
 )
 
 func resourceFirewallRule() *schema.Resource {

@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/servers"
+	"github.com/ggiamarchi/gophercloud/openstack/compute/v2/servers"
 )
 
 func TestAccOpenstackCompute(t *testing.T) {

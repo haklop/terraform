@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/subnets"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/subnets"
 )
 
 func TestAccOpenstackSubnet(t *testing.T) {

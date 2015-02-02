@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/rules"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/fwaas/rules"
 )
 
 func TestAccOpenstackFirewallRule(t *testing.T) {

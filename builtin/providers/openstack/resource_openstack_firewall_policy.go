@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/fwaas/policies"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/policies"
 )
 
 func resourceFirewallPolicy() *schema.Resource {

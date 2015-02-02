@@ -9,8 +9,8 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/fwaas/firewalls"
+	"github.com/ggiamarchi/gophercloud"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/firewalls"
 )
 
 func resourceFirewall() *schema.Resource {

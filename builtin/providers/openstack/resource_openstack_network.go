@@ -5,7 +5,7 @@ import (
 
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/networks"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/networks"
 )
 
 func resourceNetwork() *schema.Resource {

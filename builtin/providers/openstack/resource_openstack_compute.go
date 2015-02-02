@@ -11,13 +11,13 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/extensions/keypairs"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/servers"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/layer3/floatingips"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/networks"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/ports"
-	"github.com/rackspace/gophercloud/pagination"
+	"github.com/ggiamarchi/gophercloud"
+	"github.com/ggiamarchi/gophercloud/openstack/compute/v2/extensions/keypairs"
+	"github.com/ggiamarchi/gophercloud/openstack/compute/v2/servers"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/layer3/floatingips"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/networks"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/ports"
+	"github.com/ggiamarchi/gophercloud/pagination"
 )
 
 func resourceCompute() *schema.Resource {

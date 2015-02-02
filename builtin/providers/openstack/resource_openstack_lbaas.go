@@ -6,10 +6,10 @@ import (
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/lbaas/members"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/extensions/lbaas/pools"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/ports"
-	"github.com/rackspace/gophercloud/pagination"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/lbaas/members"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/lbaas/pools"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/ports"
+	"github.com/ggiamarchi/gophercloud/pagination"
 )
 
 func resourceLBaaS() *schema.Resource {
