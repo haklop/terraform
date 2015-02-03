@@ -40,6 +40,12 @@ func Provider() terraform.ResourceProvider {
 				DefaultFunc: envDefaultFunc("OS_TENANT_NAME", true),
 				Required:    true,
 			},
+
+			"region": &schema.Schema{
+				Type:        schema.TypeString,
+				DefaultFunc: envDefaultFunc("OS_REGION_NAME", true),
+				Required:    true,
+			},
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
@@ -85,6 +91,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 		Password:   d.Get("password").(string),
 		TenantId:   d.Get("tenant_id").(string),
 		TenantName: d.Get("tenant_name").(string),
+		Region:     d.Get("region").(string),
 	}
 
 	if err := config.NewClient(); err != nil {

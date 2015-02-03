@@ -2,18 +2,18 @@ package openstack
 
 import (
 	"log"
-	"os"
 
 	"github.com/ggiamarchi/gophercloud"
 	"github.com/ggiamarchi/gophercloud/openstack"
 )
 
 type Config struct {
-	AuthUrl       string `mapstructure:"auth_url"`
-	Username       string `mapstructure:"username"`
+	AuthUrl    string `mapstructure:"auth_url"`
+	Username   string `mapstructure:"username"`
 	Password   string `mapstructure:"password"`
 	TenantId   string `mapstructure:"tenant_id"`
 	TenantName string `mapstructure:"tenant_name"`
+	Region     string `mapstructure:"region"`
 
 	Provider *gophercloud.ProviderClient
 }
@@ -21,22 +21,6 @@ type Config struct {
 // Client() returns a new client for accessing openstack.
 //
 func (c *Config) NewClient() error {
-
-	if v := os.Getenv("OS_AUTH_URL"); v != "" {
-		c.AuthUrl = v
-	}
-	if v := os.Getenv("OS_USERNAME"); v != "" {
-		c.Username = v
-	}
-	if v := os.Getenv("OS_PASSWORD"); v != "" {
-		c.Password = v
-	}
-	if v := os.Getenv("OS_TENANT_ID"); v != "" {
-		c.TenantId = v
-	}
-	if v := os.Getenv("OS_TENANT_NAME"); v != "" {
-		c.TenantName = v
-	}
 
 	opts := gophercloud.AuthOptions{
 		IdentityEndpoint: c.AuthUrl,
@@ -62,6 +46,7 @@ func (c *Config) getComputeClient() (*gophercloud.ServiceClient, error) {
 	return openstack.NewComputeV2(c.Provider, gophercloud.EndpointOpts{
 		Name:         "nova",
 		Availability: gophercloud.AvailabilityPublic,
+		Region:       c.Region,
 	})
 }
 
@@ -69,5 +54,6 @@ func (c *Config) getNetworkClient() (*gophercloud.ServiceClient, error) {
 	return openstack.NewNetworkV2(c.Provider, gophercloud.EndpointOpts{
 		Name:         "neutron",
 		Availability: gophercloud.AvailabilityPublic,
+		Region:       c.Region,
 	})
 }
