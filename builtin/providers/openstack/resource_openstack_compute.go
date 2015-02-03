@@ -7,10 +7,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/hashicorp/terraform/helper/hashcode"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/racker/perigee"
 	"github.com/ggiamarchi/gophercloud"
 	"github.com/ggiamarchi/gophercloud/openstack/compute/v2/extensions/keypairs"
 	"github.com/ggiamarchi/gophercloud/openstack/compute/v2/servers"
@@ -18,6 +14,10 @@ import (
 	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/networks"
 	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/ports"
 	"github.com/ggiamarchi/gophercloud/pagination"
+	"github.com/hashicorp/terraform/helper/hashcode"
+	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/racker/perigee"
 )
 
 func resourceCompute() *schema.Resource {
@@ -224,13 +224,21 @@ func resourceComputeCreate(d *schema.ResourceData, meta interface{}) error {
 			floatingip = allocatedIP.FloatingIP
 		}
 	}
-
-	d.Set("floating_ip", floatingip)
+	var sshIP string
+	if len(floatingip) > 0 {
+		d.Set("floating_ip", floatingip)
+		sshIP = floatingip
+	} else {
+		sshIP, err = getIP(c, instance.ID)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Initialize the connection info
 	d.SetConnInfo(map[string]string{
 		"type": "ssh",
-		"host": floatingip,
+		"host": sshIP,
 	})
 
 	return nil
@@ -498,6 +506,26 @@ func resourceComputeRead(d *schema.ResourceData, meta interface{}) error {
 	d.Set("flavor_ref", server.Flavor["id"])
 
 	return nil
+}
+
+func getIP(c *Config, instanceID string) (string, error) {
+	computeClient, err := c.getComputeClient()
+	if err != nil {
+		return "", err
+	}
+
+	server, err := servers.Get(computeClient, instanceID).Extract()
+	if err != nil {
+		return "", err
+	}
+
+	for _, networkAddresses := range server.Addresses {
+		for _, element := range networkAddresses.([]interface{}) {
+			address := element.(map[string]interface{})
+			return address["addr"].(string), nil
+		}
+	}
+	return "", fmt.Errorf("No IP found for the machine")
 }
 
 func WaitForServerState(client *gophercloud.ServiceClient, id string) resource.StateRefreshFunc {
