@@ -2,7 +2,6 @@ package openstack
 
 import (
 	"log"
-	"time"
 
 	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/rules"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -98,8 +97,6 @@ func resourceFirewallRuleCreate(d *schema.ResourceData, meta interface{}) error 
 	log.Printf("[DEBUG] Firewall rule with id %s : %#v", rule.ID, rule)
 
 	d.SetId(rule.ID)
-
-	time.Sleep(time.Second * 5)
 
 	d.Set("name", rule.Name)
 	d.Set("description", rule.Description)
