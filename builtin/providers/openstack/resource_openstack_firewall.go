@@ -17,6 +17,7 @@ func resourceFirewall() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceFirewallCreate,
 		Read:   resourceFirewallRead,
+		Update:   resourceFirewallUpdate,
 		Delete: resourceFirewallDelete,
 
 		Schema: map[string]*schema.Schema{
@@ -69,7 +70,18 @@ func resourceFirewallCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	d.SetId(firewall.Id)
+	d.SetId(firewall.ID)
+
+	stateConf := &resource.StateChangeConf{
+		Pending:    []string{"PENDING_CREATE"},
+		Target:     "ACTIVE",
+		Refresh:    WaitForFirewallActive(networkClient, d.Id()),
+		Timeout:    30 * time.Second,
+		Delay:      0,
+		MinTimeout: 2 * time.Second,
+	}
+
+	_, err = stateConf.WaitForState()
 
 	return nil
 }
@@ -101,6 +113,48 @@ func resourceFirewallRead(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
+func resourceFirewallUpdate(d *schema.ResourceData, meta interface{}) error {
+
+	c := meta.(*Config)
+	networkClient, err := c.getNetworkClient()
+	if err != nil {
+		return err
+	}
+
+	opts := firewalls.UpdateOpts{}
+
+	if d.HasChange("name") {
+		opts.Name = d.Get("name").(string)
+	}
+
+	if d.HasChange("description") {
+		opts.Description = d.Get("description").(string)
+	}
+
+	if d.HasChange("policy_id") {
+		opts.PolicyId = d.Get("policy_id").(string)
+	}
+
+	log.Printf("[DEBUG] Updating firewall with id %s: %#v", d.Id(), opts)
+
+	if err := firewalls.Update(networkClient, d.Id(), opts).Err; err != nil {
+		return err
+	}
+
+	stateConf := &resource.StateChangeConf{
+		Pending:    []string{"PENDING_CREATE"},
+		Target:     "ACTIVE",
+		Refresh:    WaitForFirewallActive(networkClient, d.Id()),
+		Timeout:    30 * time.Second,
+		Delay:      0,
+		MinTimeout: 2 * time.Second,
+	}
+
+	_, err = stateConf.WaitForState()
+
+	return err
+}
+
 func resourceFirewallDelete(d *schema.ResourceData, meta interface{}) error {
 	log.Printf("[DEBUG] Destroy firewall: %s", d.Id())
 
@@ -128,6 +182,19 @@ func resourceFirewallDelete(d *schema.ResourceData, meta interface{}) error {
 	_, err = stateConf.WaitForState()
 
 	return err
+}
+
+func WaitForFirewallActive(networkClient *gophercloud.ServiceClient, id string) resource.StateRefreshFunc {
+
+	return func() (interface{}, string, error) {
+		fw, err := firewalls.Get(networkClient, id).Extract()
+		log.Printf("[DEBUG] Get firewall %s => %#v", id, fw)
+
+		if err != nil {
+			return nil, "", err
+		}
+		return fw, fw.Status, nil
+	}
 }
 
 func WaitForFirewallDeletion(networkClient *gophercloud.ServiceClient, id string) resource.StateRefreshFunc {
