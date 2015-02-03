@@ -14,6 +14,7 @@ func resourceFirewallPolicy() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceFirewallPolicyCreate,
 		Read:   resourceFirewallPolicyRead,
+		Update: resourceFirewallPolicyUpdate,
 		Delete: resourceFirewallPolicyDelete,
 
 		Schema: map[string]*schema.Schema{
@@ -82,7 +83,9 @@ func resourceFirewallPolicyCreate(d *schema.ResourceData, meta interface{}) erro
 		return err
 	}
 
-	d.SetId(policy.Id)
+	log.Printf("[DEBUG] Firewall policy craeted: %#v", policy)
+
+	d.SetId(policy.ID)
 
 	return nil
 }
@@ -113,6 +116,42 @@ func resourceFirewallPolicyRead(d *schema.ResourceData, meta interface{}) error 
 	d.Set("name", policy.Name)
 
 	return nil
+}
+
+func resourceFirewallPolicyUpdate(d *schema.ResourceData, meta interface{}) error {
+
+	p := meta.(*Config)
+	client, err := p.getNetworkClient()
+	if err != nil {
+		return err
+	}
+
+	opts := policies.UpdateOpts{}
+
+	if d.HasChange("name") {
+		opts.Name = d.Get("name").(string)
+	}
+
+	if d.HasChange("description") {
+		opts.Description = d.Get("description").(string)
+	}
+
+	if d.HasChange("rules") {
+		v := d.Get("rules").(*schema.Set)
+
+		log.Printf("[DEBUG] Rules found : %#v", v)
+		log.Printf("[DEBUG] Rules count : %i", v.Len())
+
+		rules := make([]string, v.Len())
+		for i, v := range v.List() {
+			rules[i] = v.(string)
+		}
+		opts.Rules = rules
+	}
+
+	log.Printf("[DEBUG] Updating firewall policy with id %s: %#v", d.Id(), opts)
+
+	return policies.Update(client, d.Id(), opts).Err
 }
 
 func resourceFirewallPolicyDelete(d *schema.ResourceData, meta interface{}) error {
