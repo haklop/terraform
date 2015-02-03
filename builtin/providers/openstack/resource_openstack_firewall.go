@@ -32,16 +32,12 @@ func resourceFirewall() *schema.Resource {
 			"policy_id": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
+				ForceNew: true,
 			},
 			"admin_state_up": &schema.Schema{
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  true,
-			},
-			"shared": &schema.Schema{
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  false,
 			},
 		},
 	}
@@ -58,9 +54,8 @@ func resourceFirewallCreate(d *schema.ResourceData, meta interface{}) error {
 	firewallConfiguration := firewalls.CreateOpts{
 		Name:         d.Get("name").(string),
 		Description:  d.Get("description").(string),
-		PolicyId:     d.Get("policy_id").(string),
+		PolicyID:     d.Get("policy_id").(string),
 		AdminStateUp: d.Get("admin_state_up").(bool),
-		Shared:       d.Get("shared").(bool),
 	}
 
 	log.Printf("[DEBUG] Create firewall: %#v", firewallConfiguration)
@@ -70,16 +65,23 @@ func resourceFirewallCreate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	d.SetId(firewall.ID)
+	log.Printf("[DEBUG] Firewall created: %#v", firewall)
 
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"PENDING_CREATE"},
 		Target:     "ACTIVE",
-		Refresh:    WaitForFirewallActive(networkClient, d.Id()),
+		Refresh:    WaitForFirewallActive(networkClient, firewall.ID),
 		Timeout:    30 * time.Second,
 		Delay:      0,
 		MinTimeout: 2 * time.Second,
 	}
+
+	d.SetId(firewall.ID)
+
+	d.Set("name", firewall.Name)
+	d.Set("description", firewall.Description)
+	d.Set("policy_id", firewall.PolicyID)
+	d.Set("admin_state_up", firewall.AdminStateUp)
 
 	_, err = stateConf.WaitForState()
 
@@ -110,6 +112,10 @@ func resourceFirewallRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	d.Set("name", firewall.Name)
+	d.Set("description", firewall.Description)
+	d.Set("policy_id", firewall.PolicyID)
+	d.Set("admin_state_up", firewall.AdminStateUp)
+
 	return nil
 }
 
@@ -132,7 +138,7 @@ func resourceFirewallUpdate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	if d.HasChange("policy_id") {
-		opts.PolicyId = d.Get("policy_id").(string)
+		opts.PolicyID = d.Get("policy_id").(string)
 	}
 
 	log.Printf("[DEBUG] Updating firewall with id %s: %#v", d.Id(), opts)

@@ -4,10 +4,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/policies"
 	"github.com/hashicorp/terraform/helper/hashcode"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/fwaas/policies"
 )
 
 func resourceFirewallPolicy() *schema.Resource {
@@ -162,5 +162,25 @@ func resourceFirewallPolicyDelete(d *schema.ResourceData, meta interface{}) erro
 	if err != nil {
 		return err
 	}
-	return policies.Delete(networkClient, d.Id()).Err
+
+	for i := 0; i < 15; i++ {
+
+		err = policies.Delete(networkClient, d.Id()).Err
+		if err == nil {
+			break
+		}
+
+		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+		if !ok || httpError.Actual != 409 {
+			return err
+		}
+
+		// This error usualy means that the policy is attached
+		// to a firewall. At this point, the firewall is probably
+		// being delete. So, we retry a few times.
+
+		time.Sleep(time.Second * 2)
+	}
+
+	return err
 }
