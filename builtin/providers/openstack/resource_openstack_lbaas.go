@@ -1,15 +1,15 @@
 package openstack
 
 import (
-	"fmt"
+	"log"
+	"time"
 
+	"github.com/ggiamarchi/gophercloud"
+	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/lbaas/pools"
 	"github.com/hashicorp/terraform/helper/hashcode"
+	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/lbaas/members"
-	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/extensions/lbaas/pools"
-	"github.com/ggiamarchi/gophercloud/openstack/networking/v2/ports"
-	"github.com/ggiamarchi/gophercloud/pagination"
 )
 
 func resourceLBaaS() *schema.Resource {
@@ -46,26 +46,6 @@ func resourceLBaaS() *schema.Resource {
 					return hashcode.String(v.(string))
 				},
 			},
-			"member": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"port": &schema.Schema{
-							Type:     schema.TypeInt,
-							Required: true,
-						},
-						"instance_id": &schema.Schema{
-							Type:     schema.TypeString,
-							Required: true,
-						},
-						"member_id": &schema.Schema{
-							Type:     schema.TypeString,
-							Computed: true,
-						},
-					},
-				},
-			},
 		},
 	}
 }
@@ -85,6 +65,7 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 		LBMethod: d.Get("lb_method").(string),
 	}
 
+	log.Printf("[DEBUG] Create pool: %#v", opts)
 	pool, err := pools.Create(client, opts).Extract()
 	if err != nil {
 		return err
@@ -92,9 +73,24 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 
 	d.SetId(pool.ID)
 
+	stateConf := &resource.StateChangeConf{
+		Pending:    []string{"PENDING_CREATE"},
+		Target:     "ACTIVE",
+		Refresh:    waitForLBaaSState(client, d.Id()),
+		Timeout:    30 * time.Minute,
+		Delay:      10 * time.Second,
+		MinTimeout: 3 * time.Second,
+	}
+	_, err = stateConf.WaitForState()
+
+	if err != nil {
+		return err
+	}
+
 	healthMonitor := d.Get("health_monitors").(*schema.Set)
 	monitors := expandStringList(healthMonitor.List())
 	for _, id := range monitors {
+		log.Printf("[DEBUG] Associate monitor %v", id)
 		_, err = pools.AssociateMonitor(client, d.Id(), id).Extract()
 		if err != nil {
 			return err
@@ -102,57 +98,6 @@ func resourceLBaaSCreate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	d.Set("health_monitors", monitors)
-
-	membersCount := d.Get("member.#").(int)
-	for i := 0; i < membersCount; i++ {
-		prefix := fmt.Sprintf("member.%d", i)
-
-		var member poolMember
-		member.ProtocolPort = d.Get(prefix + ".port").(int)
-		member.InstanceId = d.Get(prefix + ".instance_id").(string)
-
-		opts := ports.ListOpts{
-			DeviceID: member.InstanceId,
-		}
-		pager := ports.List(client, opts)
-
-		var address string
-		err := pager.EachPage(func(page pagination.Page) (bool, error) {
-			extractedPorts, err := ports.ExtractPorts(page)
-			if err != nil {
-				return false, err
-			}
-
-			for _, port := range extractedPorts {
-				for _, ips := range port.FixedIPs {
-					// if possible, select a port on pool subnet
-					if ips.SubnetID == d.Get("subnet_id").(string) || address == "" {
-						address = ips.IPAddress
-					}
-				}
-			}
-
-			return len(address) == 0, nil
-		})
-
-		if len(address) == 0 {
-			return fmt.Errorf("Cannot find a commun subnet")
-		}
-
-		membersOpts := members.CreateOpts{
-			Address:      address,
-			ProtocolPort: member.ProtocolPort,
-			PoolID:       pool.ID,
-		}
-
-		result, err := members.Create(client, membersOpts).Extract()
-		if err != nil {
-			return err
-		}
-		member.MemberId = result.ID
-
-		d.Set(prefix+".member_id", member.MemberId)
-	}
 
 	return nil
 
@@ -168,40 +113,21 @@ func resourceLBaaSDelete(d *schema.ResourceData, meta interface{}) error {
 	healthMonitor := d.Get("health_monitors").(*schema.Set)
 	monitors := expandStringList(healthMonitor.List())
 	for _, id := range monitors {
+		log.Printf("[DEBUG] Disassociate monitor %v", d.Id())
 		_, err = pools.DisassociateMonitor(client, d.Id(), id).Extract()
 		if err != nil {
 			return err
 		}
 	}
 
+	log.Printf("[DEBUG] Delete pool %v", d.Id())
 	result := pools.Delete(client, d.Id())
 	return result.Err
 }
 
 func resourceLBaaSRead(d *schema.ResourceData, meta interface{}) error {
-	p := meta.(*Config)
-	client, err := p.getNetworkClient()
-	if err != nil {
-		return err
-	}
 
-	pool, err := pools.Get(client, d.Id()).Extract()
-	if err != nil {
-		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
-		if !ok {
-			return err
-		}
-
-		if httpError.Actual == 404 {
-			d.SetId("")
-			return nil
-		}
-
-		return err
-	}
-
-	readPool(pool, d)
-	return nil
+	return readPool(d, meta)
 
 }
 
@@ -224,6 +150,7 @@ func resourceLBaaSUpdate(d *schema.ResourceData, meta interface{}) error {
 			opts.LBMethod = d.Get("lb_method").(string)
 		}
 
+		log.Printf("[DEBUG] Update pool: %#v", opts)
 		_, err = pools.Update(client, d.Id(), opts).Extract()
 		if err != nil {
 			return err
@@ -241,6 +168,7 @@ func resourceLBaaSUpdate(d *schema.ResourceData, meta interface{}) error {
 		add := expandStringList(ns.Difference(os).List())
 
 		for _, id := range remove {
+			log.Printf("[DEBUG] Disassociate monitor %v", id)
 			_, err = pools.DisassociateMonitor(client, d.Id(), id).Extract()
 			if err != nil {
 				return err
@@ -248,6 +176,7 @@ func resourceLBaaSUpdate(d *schema.ResourceData, meta interface{}) error {
 		}
 
 		for _, id := range add {
+			log.Printf("[DEBUG] Associate monitor %v", id)
 			_, err = pools.AssociateMonitor(client, d.Id(), id).Extract()
 			if err != nil {
 				return err
@@ -262,12 +191,36 @@ func resourceLBaaSUpdate(d *schema.ResourceData, meta interface{}) error {
 
 }
 
-func readPool(pool *pools.Pool, d *schema.ResourceData) {
+func readPool(d *schema.ResourceData, meta interface{}) error {
+	p := meta.(*Config)
+	client, err := p.getNetworkClient()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("[DEBUG] Read pool: %s", d.Id())
+	pool, err := pools.Get(client, d.Id()).Extract()
+	if err != nil {
+		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+		if !ok {
+			return err
+		}
+
+		if httpError.Actual == 404 {
+			d.SetId("")
+			return nil
+		}
+
+		return err
+	}
+
 	d.Set("name", pool.Name)
 	d.Set("subnet_id", pool.SubnetID)
 	d.Set("protocol", pool.Protocol)
 	d.Set("lb_method", pool.LBMethod)
 	d.Set("health_monitors", pool.MonitorIDs)
+
+	return nil
 }
 
 // Takes the result of flatmap.Expand for an array of strings
@@ -280,8 +233,22 @@ func expandStringList(configured []interface{}) []string {
 	return vs
 }
 
-type poolMember struct {
-	ProtocolPort int
-	InstanceId   string
-	MemberId     string
+func waitForLBaaSState(client *gophercloud.ServiceClient, id string) resource.StateRefreshFunc {
+
+	return func() (interface{}, string, error) {
+		s, err := pools.Get(client, id).Extract()
+
+		if err != nil {
+			httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
+			if !ok {
+				return nil, "", err
+			}
+
+			if httpError.Actual == 404 {
+				return s, "DELETED", nil
+			}
+			return nil, "", err
+		}
+		return s, s.Status, nil
+	}
 }
