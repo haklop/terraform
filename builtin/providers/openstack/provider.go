@@ -1,6 +1,7 @@
 package openstack
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/hashicorp/terraform/helper/schema"
@@ -12,25 +13,31 @@ func Provider() terraform.ResourceProvider {
 		Schema: map[string]*schema.Schema{
 			"auth_url": &schema.Schema{
 				Type:        schema.TypeString,
-				DefaultFunc: envDefaultFunc("OS_AUTH_URL"),
+				DefaultFunc: envDefaultFunc("OS_AUTH_URL", false),
 				Required:    true,
 			},
 
 			"username": &schema.Schema{
 				Type:        schema.TypeString,
-				DefaultFunc: envDefaultFunc("OS_USERNAME"),
+				DefaultFunc: envDefaultFunc("OS_USERNAME", false),
 				Required:    true,
 			},
 
 			"password": &schema.Schema{
 				Type:        schema.TypeString,
-				DefaultFunc: envDefaultFunc("OS_PASSWORD"),
+				DefaultFunc: envDefaultFunc("OS_PASSWORD", false),
 				Required:    true,
 			},
 
 			"tenant_id": &schema.Schema{
 				Type:        schema.TypeString,
-				DefaultFunc: envDefaultFunc("OS_TENANT_ID"),
+				DefaultFunc: envDefaultFunc("OS_TENANT_ID", true),
+				Required:    true,
+			},
+
+			"tenant_name": &schema.Schema{
+				Type:        schema.TypeString,
+				DefaultFunc: envDefaultFunc("OS_TENANT_NAME", true),
 				Required:    true,
 			},
 		},
@@ -51,22 +58,33 @@ func Provider() terraform.ResourceProvider {
 	}
 }
 
-func envDefaultFunc(k string) schema.SchemaDefaultFunc {
+func envDefaultFunc(k string, emptyStringifNotSpecified bool) schema.SchemaDefaultFunc {
 	return func() (interface{}, error) {
 		if v := os.Getenv(k); v != "" {
 			return v, nil
 		}
-
+		if emptyStringifNotSpecified {
+			return "", nil
+		}
 		return nil, nil
 	}
 }
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
+
+	tenantID := d.Get("tenant_id").(string)
+	tenantName := d.Get("tenant_name").(string)
+
+	if tenantID == "" && tenantName == "" {
+		return nil, fmt.Errorf("tenant_id or tenant_name must be provided")
+	}
+
 	config := Config{
-		AuthUrl:  d.Get("auth_url").(string),
-		Username: d.Get("username").(string),
-		Password: d.Get("password").(string),
-		TenantId: d.Get("tenant_id").(string),
+		AuthUrl:    d.Get("auth_url").(string),
+		Username:   d.Get("username").(string),
+		Password:   d.Get("password").(string),
+		TenantId:   d.Get("tenant_id").(string),
+		TenantName: d.Get("tenant_name").(string),
 	}
 
 	if err := config.NewClient(); err != nil {
