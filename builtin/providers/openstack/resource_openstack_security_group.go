@@ -3,10 +3,9 @@ package openstack
 import (
 	"fmt"
 
-	"github.com/haklop/gophercloud-extensions/network"
+	"github.com/ggiamarchi/gophercloud/openstack/compute/v2/extensions/secgroups"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/racker/perigee"
-	"github.com/rackspace/gophercloud"
 )
 
 func resourceSecurityGroup() *schema.Resource {
@@ -14,17 +13,16 @@ func resourceSecurityGroup() *schema.Resource {
 		Create: resourceSecurityGroupCreate,
 		Read:   resourceSecurityGroupRead,
 		Delete: resourceSecurityGroupDelete,
+		Update: resourceSecurityGroupUpdate,
 
 		Schema: map[string]*schema.Schema{
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
-				ForceNew: true,
 			},
 			"description": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
-				ForceNew: true,
 			},
 			"rule": &schema.Schema{
 				Type:     schema.TypeList,
@@ -32,29 +30,30 @@ func resourceSecurityGroup() *schema.Resource {
 				ForceNew: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"direction": &schema.Schema{
-							Type:     schema.TypeString,
-							Required: true,
-						},
-						"remote_ip_prefix": &schema.Schema{
-							Type:     schema.TypeString,
-							Required: true,
-						},
-						"port_range_min": &schema.Schema{
+						"from_port": &schema.Schema{
 							Type:     schema.TypeInt,
 							Required: true,
+							ForceNew: true,
 						},
-						"port_range_max": &schema.Schema{
+						"to_port": &schema.Schema{
 							Type:     schema.TypeInt,
 							Required: true,
+							ForceNew: true,
 						},
-						"protocol": &schema.Schema{
+						"ip_protocol": &schema.Schema{
 							Type:     schema.TypeString,
 							Required: true,
+							ForceNew: true,
 						},
-						"rule_id": &schema.Schema{
-							Type:     schema.TypeInt,
-							Computed: true,
+						"cidr": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+							ForceNew: true,
+						},
+						"from_group_id": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+							ForceNew: true,
 						},
 					},
 				},
@@ -64,46 +63,36 @@ func resourceSecurityGroup() *schema.Resource {
 }
 
 func resourceSecurityGroupCreate(d *schema.ResourceData, meta interface{}) error {
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	computeClient, err := c.getComputeClient()
 	if err != nil {
 		return err
 	}
 
-	access := p.AccessProvider.(*gophercloud.Access)
-
-	newSecurityGroup, err := networksApi.CreateSecurityGroup(network.NewSecurityGroup{
+	opts := secgroups.CreateOpts{
 		Name:        d.Get("name").(string),
 		Description: d.Get("description").(string),
-		TenantId:    access.Token.Tenant.Id,
-	})
+	}
+
+	newSecurityGroup, err := secgroups.Create(computeClient, opts).Extract()
 	if err != nil {
 		return err
 	}
 
-	d.SetId(newSecurityGroup.Id)
+	d.SetId(newSecurityGroup.ID)
 
 	rulesCount := d.Get("rule.#").(int)
-	rules := make([]*network.SecurityGroupRule, 0, rulesCount)
 	for i := 0; i < rulesCount; i++ {
 		prefix := fmt.Sprintf("rule.%d", i)
 
-		var rule network.SecurityGroupRule
-		rule.Direction = d.Get(prefix + ".direction").(string)
-		rule.RemoteIpPrefix = d.Get(prefix + ".remote_ip_prefix").(string)
-		rule.PortRangeMin = d.Get(prefix + ".port_range_min").(int)
-		rule.PortRangeMax = d.Get(prefix + ".port_range_max").(int)
-		rule.Protocol = d.Get(prefix + ".protocol").(string)
-
-		rules = append(rules, &rule)
-	}
-
-	for _, rule := range rules {
-		rule.SecurityGroupId = d.Id()
-		rule.TenantId = access.Token.Tenant.Id
-
-		// TODO store rules id for allowed updates
-		_, err := networksApi.CreateSecurityGroupRule(*rule)
+		var ruleOpts secgroups.CreateRuleOpts
+		ruleOpts.ParentGroupID = newSecurityGroup.ID
+		ruleOpts.FromPort = d.Get(prefix + ".from_port").(int)
+		ruleOpts.ToPort = d.Get(prefix + ".to_port").(int)
+		ruleOpts.IPProtocol = d.Get(prefix + ".ip_protocol").(string)
+		ruleOpts.CIDR = d.Get(prefix + ".cidr").(string)
+		ruleOpts.FromGroupID = d.Get(prefix + ".from_group_id").(string)
+		_, err = secgroups.CreateRule(computeClient, ruleOpts).Extract()
 		if err != nil {
 			return err
 		}
@@ -113,23 +102,52 @@ func resourceSecurityGroupCreate(d *schema.ResourceData, meta interface{}) error
 }
 
 func resourceSecurityGroupDelete(d *schema.ResourceData, meta interface{}) error {
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	computeClient, err := c.getComputeClient()
 	if err != nil {
 		return err
 	}
 
-	return networksApi.DeleteSecurityGroup(d.Id())
+	res := secgroups.Delete(computeClient, d.Id())
+	return res.Err
+}
+
+func resourceSecurityGroupUpdate(d *schema.ResourceData, meta interface{}) error {
+	c := meta.(*Config)
+	computeClient, err := c.getComputeClient()
+	if err != nil {
+		return err
+	}
+
+	d.Partial(true)
+
+	if d.HasChange("name") || d.HasChange("description") {
+		opts := secgroups.UpdateOpts{
+			Name:        d.Get("name").(string),
+			Description: d.Get("description").(string),
+		}
+		_, err := secgroups.Update(computeClient, d.Id(), opts).Extract()
+		if err != nil {
+			return err
+		}
+
+		d.SetPartial("name")
+		d.SetPartial("description")
+	}
+
+	d.Partial(false)
+
+	return nil
 }
 
 func resourceSecurityGroupRead(d *schema.ResourceData, meta interface{}) error {
-	p := meta.(*Config)
-	networksApi, err := p.getNetworkApi()
+	c := meta.(*Config)
+	computeClient, err := c.getComputeClient()
 	if err != nil {
 		return err
 	}
 
-	_, err = networksApi.GetSecurityGroup(d.Id())
+	_, err = secgroups.Get(computeClient, d.Id()).Extract()
 	if err != nil {
 		httpError, ok := err.(*perigee.UnexpectedResponseCodeError)
 		if !ok {
@@ -143,8 +161,5 @@ func resourceSecurityGroupRead(d *schema.ResourceData, meta interface{}) error {
 
 		return err
 	}
-
-	// TODO check rules
-
 	return nil
 }
